@@ -1,27 +1,32 @@
 <?php
+session_start();
 
-/**
- * Redirige vers une étape spécifique
- */
-function nextStep($name) {
-    header('Location: ?step=' . $name);
-    exit;
+function rootPath() { 
+    return realpath(__DIR__.'/..'); 
 }
 
-/**
- * Retourne le chemin racine du projet (où se trouve le .env)
- */
-function rootPath() {
-    return realpath(__DIR__ . '/..');
+// Exécute une commande artisan et retourne le résultat
+function runArtisan($command) {
+    $artisan = rootPath() . '/artisan';
+    // On force le chemin vers PHP pour éviter les conflits
+    $cmd = "php $artisan $command 2>&1"; 
+    return shell_exec($cmd);
 }
 
-/**
- * Retourne le chemin complet du fichier .env
- */
-function envPath() {
-    return rootPath() . '/.env';
+function updateEnv(array $data) {
+    $path = rootPath() . '/.env';
+    $content = file_get_contents($path);
+    foreach ($data as $key => $value) {
+        // Gère les valeurs avec des espaces
+        $val = (strpos($value, ' ') !== false) ? '"' . $value . '"' : $value;
+        $content = preg_replace("/^{$key}=.*/m", "{$key}={$val}", $content);
+    }
+    return file_put_contents($path, $content);
 }
 
+function sanitize($data) {
+    return htmlspecialchars(trim($data ?? ''), ENT_QUOTES, 'UTF-8');
+}
 /**
  * Vérifie les prérequis PHP nécessaires à Laravel
  */
@@ -55,55 +60,7 @@ function checkPermissions() {
     }
     return $results;
 }
-
-/**
- * Met à jour ou crée les variables dans le fichier .env
- */
-function updateEnv(array $data) {
-    $path = envPath();
-    
-    // Si le fichier n'existe pas, on tente de copier .env.example
-    if (!file_exists($path) && file_exists(rootPath() . '/.env.example')) {
-        copy(rootPath() . '/.env.example', $path);
-    }
-
-    $content = file_exists($path) ? file_get_contents($path) : '';
-
-    foreach ($data as $key => $value) {
-        // Gère les valeurs avec des espaces
-        if (preg_match('/\s/', $value)) {
-            $value = '"' . $value . '"';
-        }
-
-        if (preg_match("/^{$key}=/m", $content)) {
-            $content = preg_replace("/^{$key}=.*/m", "{$key}={$value}", $content);
-        } else {
-            $content .= "\n{$key}={$value}";
-        }
-    }
-
-    return file_put_contents($path, trim($content) . "\n");
-}
-
-/**
- * Teste la connexion à la base de données via PDO
- */
-function testDatabaseConnection($host, $db, $user, $pass) {
-    try {
-        $dsn = "mysql:host=$host;dbname=$db;charset=utf8mb4";
-        $options = [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_TIMEOUT => 5];
-        new PDO($dsn, $user, $pass, $options);
-        return true;
-    } catch (PDOException $e) {
-        return $e->getMessage();
-    }
-}
-/**
- * Nettoie les données pour éviter les failles XSS lors de l'affichage
- */
-function sanitize($data) {
-    if (is_array($data)) {
-        return array_map('sanitize', $data);
-    }
-    return htmlspecialchars(trim($data ?? ''), ENT_QUOTES, 'UTF-8');
+function nextStep($name) {
+    header('Location: ?step=' . $name);
+    exit;
 }

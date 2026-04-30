@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\Order;
 use App\Models\OrderItem;
+use App\Models\Payment;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Carbon\Carbon;
@@ -92,6 +93,91 @@ class ReportController extends Controller
             'cashier' => $user->name,
             'shift_date' => $today->toDateTimeString(),
             'breakdown' => $report
+        ]);
+    }
+    public function getAnalytics(Request $request)
+    {
+        // 1. Validation et Définition de la période unique
+        $request->validate([
+            'start_date' => 'nullable|date',
+            'end_date' => 'nullable|date|after_or_equal:start_date',
+        ]);
+
+        // On utilise les dates de la requête ou les 30 derniers jours par défaut
+        $start = $request->start_date ? Carbon::parse($request->start_date)->startOfDay() : now()->subDays(30)->startOfDay();
+        $end = $request->end_date ? Carbon::parse($request->end_date)->endOfDay() : now()->endOfDay();
+
+        // 2. Chiffre d'Affaires et KPIs (Basé sur la table payments pour la précision)
+        $totalSales = Payment::whereBetween('created_at', [$start, $end])->sum('amount');
+        $orderCount = Order::whereBetween('created_at', [$start, $end])->count();
+        $averageCart = $orderCount > 0 ? $totalSales / $orderCount : 0;
+
+        // 3. Flux Horaire
+        $hourlyFlow = Order::whereBetween('created_at', [$start, $end])
+            ->select(DB::raw('HOUR(created_at) as hour'), DB::raw('count(*) as count'))
+            ->groupBy('hour')
+            ->orderBy('hour')
+            ->get();
+
+        // 4. Performance Serveurs (Lien user_id sur orders)
+        $waiterPerformance = Order::join('users', 'orders.user_id', '=', 'users.id')
+            ->whereBetween('orders.created_at', [$start, $end])
+            ->select('users.name', DB::raw('SUM(orders.total) as sales'), DB::raw('COUNT(orders.id) as orders'))
+            ->groupBy('users.id', 'users.name')
+            ->orderByDesc('sales')
+            ->take(5)
+            ->get();
+
+        // 5. Répartition des Modes de Paiement
+        $payments = DB::table('payments')
+            ->join('payment_methods', 'payments.payment_method_id', '=', 'payment_methods.id')
+            ->whereBetween('payments.created_at', [$start, $end])
+            ->select(
+                'payment_methods.name as method_name',
+                DB::raw('SUM(payments.amount) as total')
+            )
+            ->groupBy('payment_methods.id', 'payment_methods.name')
+            ->get();
+
+        // 6. Évolution des ventes (Graphique linéaire)
+        $salesOverTime = Order::where('status', 'paid')
+            ->whereBetween('created_at', [$start, $end])
+            ->select(DB::raw('DATE(created_at) as date'), DB::raw('SUM(total) as total'))
+            ->groupBy('date')
+            ->orderBy('date')
+            ->get();
+
+        // 7. Top 5 des produits les plus vendus
+        $topProducts = OrderItem::join('products', 'order_items.product_id', '=', 'products.id')
+            ->join('orders', 'order_items.order_id', '=', 'orders.id')
+            ->whereBetween('orders.created_at', [$start, $end])
+            ->where('orders.status', 'paid')
+            ->select(
+                'products.name',
+                DB::raw('SUM(order_items.qty) as qty'),
+                DB::raw('SUM(order_items.total) as revenue')
+            )
+            ->groupBy('products.id', 'products.name')
+            ->orderByDesc('qty')
+            ->take(5)
+            ->get();
+
+        // 8. Retour JSON unique et cohérent
+        return response()->json([
+            'summary' => [
+                'period_label' => "Du {$start->format('d/m')} au {$end->format('d/m/Y')}"
+            ],
+            'kpis' => [
+                'total_sales' => (float) $totalSales,
+                'orders_count' => $orderCount,
+                'average_cart' => (float) $averageCart,
+                'food_cost' => 32, // À dynamiser plus tard si nécessaire
+            ],
+            'hourly_flow' => $hourlyFlow,
+            'waiters' => $waiterPerformance,
+            'payments' => $payments,
+            'chart_data' => $salesOverTime,
+            'top_products' => $topProducts
         ]);
     }
 }

@@ -6,11 +6,11 @@ use App\Models\KitchenTicket;
 use App\Http\Resources\KitchenTicketResource;
 use Illuminate\Broadcasting\Channel;
 use Illuminate\Broadcasting\InteractsWithSockets;
-use Illuminate\Contracts\Broadcasting\ShouldBroadcast; // <--- NE PAS OUBLIER
+use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
 
-class TicketCreated implements ShouldBroadcast // <--- AJOUTER ICI
+class TicketCreated implements ShouldBroadcast
 {
     use Dispatchable, InteractsWithSockets, SerializesModels;
 

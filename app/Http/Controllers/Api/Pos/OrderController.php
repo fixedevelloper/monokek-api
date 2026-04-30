@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\Pos;
 
+use App\Events\KitchenStationUpdated;
 use App\Events\OrderCreated;
 use App\Events\OrderStatusUpdated;
 use App\Events\TicketCreated;
@@ -79,10 +80,37 @@ class OrderController extends Controller
                 }
             }
 
+            // 4. CRÉATION DES TICKETS DE CUISINE VIA LES CATÉGORIES
+            $itemsByStation = $order->items->groupBy(function ($item) {
+                // On récupère la station définie au niveau de la catégorie
+                return $item->product->category->kitchen_station_id;
+            });
+
+            foreach ($itemsByStation as $stationId => $items) {
+                // On ne crée le ticket que si la catégorie est liée à une station
+                if ($stationId) {
+                    // 1. On crée le ticket et on le stocke dans une variable
+                    $ticket = $order->kitchenTickets()->create([
+                        'station_id' => $stationId,
+                        'status' => 'pending',
+                    ]);
+
+                    // 2. On charge les relations nécessaires (order et items) avant de diffuser
+                    // Cela évite que le frontend reçoive un ticket vide
+                    $ticket->load(['order', 'station']);
+// Déclencher la mise à jour pour la station concernée
+                    broadcast(new KitchenStationUpdated($ticket->station))->toOthers();
+                    // 3. On diffuse l'événement
+                    broadcast(new TicketCreated($ticket))->toOthers();
+
+                    Log::info("Ticket cuisine diffusé pour la station : " . $stationId);
+                }
+            }
             // 4. Mettre à jour le statut de la table
             $table->update(['status' => 'billing']);
+            //  $table->update(['status' => 'sent_to_kitchen']);
             broadcast(new OrderCreated($order))->toOthers();
-            // On charge les relations pour la ressource de retour
+
             return new OrderResource($order->load(['items.product', 'items.modifiers.modifierItem', 'table']));
         });
     }
@@ -136,32 +164,6 @@ class OrderController extends Controller
                 'reference' => $request->reference ?? null,
             ]);
 
-            // 4. CRÉATION DES TICKETS DE CUISINE VIA LES CATÉGORIES
-            $itemsByStation = $order->items->groupBy(function ($item) {
-                // On récupère la station définie au niveau de la catégorie
-                return $item->product->category->kitchen_station_id;
-            });
-
-            foreach ($itemsByStation as $stationId => $items) {
-                // On ne crée le ticket que si la catégorie est liée à une station
-                if ($stationId) {
-                    // 1. On crée le ticket et on le stocke dans une variable
-                    $ticket = $order->kitchenTickets()->create([
-                        'station_id' => $stationId,
-                        'status' => 'pending',
-                    ]);
-
-                    // 2. On charge les relations nécessaires (order et items) avant de diffuser
-                    // Cela évite que le frontend reçoive un ticket vide
-                    $ticket->load(['order', 'station']);
-
-                    // 3. On diffuse l'événement
-                    broadcast(new TicketCreated($ticket))->toOthers();
-
-                    Log::info("Ticket cuisine diffusé pour la station : " . $stationId);
-                }
-            }
-
             // 4. Historique
             $order->statusHistories()->create([
                 'status' => 'paid',
@@ -190,11 +192,30 @@ class OrderController extends Controller
      */
     public function history(Request $request)
     {
+        $user = $request->user();
+
+        $session = CashSession::where('user_id', $user->id)
+            ->whereNull('closed_at')
+            ->first();
+
+        if (!$session) {
+            return Helpers::error("Session de caisse introuvable.");
+        }
+
         $orders = Order::with(['table', 'user', 'items', 'items.product', 'items.modifiers.modifierItem'])
-            ->whereIn('status', ['paid', 'completed', 'pending_payment'])
+            ->where(function ($query) use ($session) {
+                // 1. Les commandes PAYÉES dans MA session
+                $query->whereHas('payments', function ($q) use ($session) {
+                    $q->where('cash_session_id', $session->id);
+                })
+                    // 2. OU les commandes qui n'ont PAS ENCORE de paiement (En attente)
+                    // On vérifie le statut pour ne pas voir les commandes annulées ou trop vieilles
+                    ->orWhereNotIn('status', ['cancelled', 'pay',]);
+            })
+            // Optionnel : Limiter les "En attente" à aujourd'hui pour éviter de polluer la liste
+            ->where('created_at', '>=', now()->startOfDay())
             ->latest()
             ->paginate(20);
-
 
         return Helpers::success(OrderResource::collection($orders));
     }
@@ -223,4 +244,65 @@ class OrderController extends Controller
         $orders = $query->latest()->paginate(50);
         return Helpers::success(OrderResource::collection($orders));
     }
+    public function index(Request $request)
+    {
+        $query = Order::query()->with(['table', 'user']);
+
+        // Filtre par recherche (Référence ou Table)
+        if ($request->filled('search')) {
+            $query->where(function ($q) use ($request) {
+                $q->where('reference', 'like', "%{$request->search}%")
+                    ->orWhereHas('table', function ($sq) use ($request) {
+                        $sq->where('name', 'like', "%{$request->search}%");
+                    });
+            });
+        }
+
+        // Filtre par Date Spécifique
+        if ($request->filled('date')) {
+            $query->whereDate('created_at', $request->date);
+        }
+
+        // Filtre par Statut
+        if ($request->filled('status') && $request->status !== 'all') {
+            $query->where('status', $request->status);
+        }
+
+        // Pagination pour éviter de surcharger Tauri
+        $orders = $query->latest()->paginate(15);
+
+        return OrderResource::collection($orders);
+    }
+    public function waiterOrders(Request $request)
+    {
+        $query = Order::with(['table', 'items.product'])
+            ->where('user_id', auth()->id());
+
+        // Filtre par date (si présent, sinon aujourd'hui par défaut)
+        if ($request->filled('date')) {
+            $query->whereDate('created_at', $request->date);
+        } else {
+            $query->whereDate('created_at', now()->today());
+        }
+
+        // Filtre par statut
+        if ($request->filled('status') && $request->status !== 'all') {
+            $query->where('status', $request->status);
+        }
+
+        return OrderResource::collection($query->latest()->get());
+    }
+    public function markAsServed(Order $order)
+{
+    // 1. On met à jour le statut de l'ordre
+    $order->update(['status' => 'completed']);
+
+    // 2. On met à jour tous les tickets de cuisine liés à 'served'
+    $order->kitchenTickets()->update(['status' => 'served']);
+
+    // 3. On broadcast l'info pour que la Caisse et le Serveur voient le changement
+    broadcast(new OrderStatusUpdated($order->load(['table', 'items'])))->toOthers();
+
+    return response()->json(['message' => 'Commande servie !']);
+}
 }

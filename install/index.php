@@ -1,5 +1,5 @@
 <?php
-session_start();
+//session_start();
 
 error_reporting(E_ALL);
 ini_set('display_errors', 1);
@@ -8,7 +8,7 @@ if (file_exists(__DIR__.'/installed.lock')) {
     die('Installer disabled');
 }
 
-$allowed = ['welcome','server','database','license','admin','finish'];
+$allowed = ['welcome','server','database','license','admin','services','finish'];
 $step = $_GET['step'] ?? 'welcome';
 
 if (!in_array($step, $allowed)) {
@@ -22,7 +22,6 @@ require __DIR__ . '/helpers.php';
 <head>
     <meta charset="UTF-8">
     <title>Laravel Installer</title>
-    <link rel="stylesheet" href="assets/css/style.css">
 </head>
 <body>
 

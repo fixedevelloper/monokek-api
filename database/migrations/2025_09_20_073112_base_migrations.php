@@ -43,6 +43,7 @@ return new class extends Migration {
             $table->uuid()->unique();
             $table->string('name');
             $table->string('phone')->nullable();
+             $table->string('pin_code')->nullable();
             $table->string('email')->nullable()->unique();
             $table->string('password');
             $table->boolean('is_active')->default(true);
@@ -231,7 +232,7 @@ return new class extends Migration {
             $table->foreignId('customer_id')->nullable()->constrained()->nullOnDelete();
             $table->foreignId('user_id')->constrained()->cascadeOnDelete();
             $table->string('type')->default('dinein'); // takeaway delivery
-            $table->enum('status', ['draft', 'pending_payment', 'pending', 'billing', 'paid', 'completed', 'cancelled'])->default('draft');
+            $table->enum('status', ['draft', 'pending_payment', 'pending', 'billing', 'paid', 'completed', 'cancelled','ready','preparing'])->default('draft');
             $table->decimal('subtotal', 12, 2)->default(0);
             $table->decimal('tax', 12, 2)->default(0);
             $table->decimal('discount', 12, 2)->default(0);

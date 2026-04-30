@@ -30,7 +30,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
 
     // AUTH - Actions supplémentaires
     Route::post('logout', [AuthController::class, 'logout']);
-    Route::post('verify-pin', [AuthController::class, 'verifyPin']);
+    Route::post('auth/verify-pin', [AuthController::class, 'verifyPin']);
     Route::get('me', function (Request $request) {
         return $request->user();
     });
@@ -50,11 +50,13 @@ Route::middleware(['auth:sanctum'])->group(function () {
 
 
         // Commandes
+        Route::get('orders', [OrderController::class, 'index']);
         Route::get('orders/history', [OrderController::class, 'history']);
+        Route::get('waiter/orders', [OrderController::class, 'waiterOrders']);
         Route::post('orders', [OrderController::class, 'store']);
         Route::post('orders/request-bill', [OrderController::class, 'requestBill']);
         Route::post('orders/{order}/finalize', [OrderController::class, 'finalizePayment']);
-        // --- Gestion de la Caisse ---
+        Route::post('orders/{order}/serve', [OrderController::class, 'markAsServed']);
 
     });
     Route::prefix('cash')->group(function () {
@@ -101,10 +103,11 @@ Route::middleware(['auth:sanctum'])->group(function () {
             Route::post('products', [ProductController::class, 'store']);
             Route::get('products', [ProductController::class, 'index']);
             Route::get('categories', [ProductController::class, 'categories']);
-            // Rapports & Analytics
+            // Rapports & Analytics  
             Route::get('reports/dashboard', [ReportController::class, 'dashboardStats']);
             Route::get('reports/categories', [ReportController::class, 'salesByCategory']);
-            Route::get('reports/closing', [ReportController::class, 'closingReport']);
+            Route::get('analytics', [ReportController::class, 'getAnalytics']);
+              Route::get('reports/closing', [ReportController::class, 'closingReport']);
             Route::apiResource('tables', TableController::class);
             Route::patch('tables/{table}', [TableController::class, 'updateStatus']);
             // Inventaire (CRUD complet + Ajustements)
