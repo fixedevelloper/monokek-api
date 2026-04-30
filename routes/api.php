@@ -21,7 +21,7 @@ use App\Http\Controllers\Api\Admin\StaffController;
 //Route::prefix('v1')->group(function () {
 
 // --- ROUTES PUBLIQUES ---
-Route::post('login', [AuthController::class, 'login']);
+Route::post('login', [AuthController::class, 'login'])->name('login');
 Route::get('/ping', function () {
     return response()->json(['status' => 'ok']);
 });
