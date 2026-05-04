@@ -42,9 +42,13 @@ class Order extends Model
         return $this->belongsTo(RestaurantTable::class, 'table_id');
     }
 
-    public function user(): BelongsTo
+    public function user() //le serveur
     {
-        return $this->belongsTo(User::class);
+        return $this->belongsTo(User::class, 'user_id');
+    }
+    public function cashier()
+    {
+        return $this->belongsTo(User::class, 'cashier_id');
     }
 
     public function customer(): BelongsTo
@@ -56,8 +60,12 @@ class Order extends Model
     {
         return $this->hasMany(OrderItem::class);
     }
+    public function commissions(): HasMany
+    {
+        return $this->hasMany(Commission::class);
+    }
     /**
-     * Récupérer les paiements de la commande 
+     * Récupérer les paiements de la commande
      * (Utile si tu acceptes les paiements partiels : ex moitié Cash / moitié MoMo)
      */
     public function payments(): HasMany

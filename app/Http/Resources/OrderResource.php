@@ -15,7 +15,7 @@ class OrderResource extends JsonResource
             'reference' => $this->reference,
             'type' => $this->type,
             'status' => $this->status,
-            
+
             // Montants formatés pour le front
             'amounts' => [
                 'subtotal' => (float) $this->subtotal,
@@ -31,8 +31,12 @@ class OrderResource extends JsonResource
                 'id' => $this->user_id,
                 'name' => $this->whenLoaded('user', fn() => $this->user->name),
             ],
+            'cashier' => [
+                'id' => $this->cashier_id,
+                'name' => $this->whenLoaded('cashier', fn() => $this->cashier->name),
+            ],
             'items' => OrderItemResource::collection($this->whenLoaded('items')),
-            
+
             'note' => $this->note,
             'created_at' => $this->created_at->format('H:i'), // Utile pour le temps d'attente
             'date' => $this->created_at->format('d/m/Y'),

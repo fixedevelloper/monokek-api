@@ -60,7 +60,7 @@ public function updateFloor(Request $request, Floor $floor) {
     {
         $validated = $request->validate([
             'floor_id' => 'required|exists:floors,id',
-            'name' => 'required|unique:tables,name',
+            'name' => 'required|unique:restaurant_tables,name',
             'seats' => 'required|integer|min:1',
 
         ]);

@@ -1,8 +1,11 @@
 <?php
 
+use App\Http\Controllers\Api\Admin\CommissionController;
 use App\Http\Controllers\Api\Admin\IngredientController;
+use App\Http\Controllers\Api\Admin\ModifierController;
 use App\Http\Controllers\Api\Admin\PurchaseOrderController;
 use App\Http\Controllers\Api\Admin\RecipeController;
+use App\Http\Controllers\Api\Admin\ReservationController;
 use App\Http\Controllers\Api\Admin\SettingsController;
 use App\Http\Controllers\Api\Pos\CashController;
 use Illuminate\Http\Request;
@@ -57,7 +60,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::post('orders/request-bill', [OrderController::class, 'requestBill']);
         Route::post('orders/{order}/finalize', [OrderController::class, 'finalizePayment']);
         Route::post('orders/{order}/serve', [OrderController::class, 'markAsServed']);
-
+        Route::get('/tables/{table}/active-order', [OrderController::class, 'getActiveOrder']);
     });
     Route::prefix('cash')->group(function () {
         Route::get('/registers', function () {
@@ -101,13 +104,24 @@ Route::middleware(['auth:sanctum'])->group(function () {
         ->prefix('admin')
         ->group(function () {
             Route::post('products', [ProductController::class, 'store']);
+            Route::patch('products/{id}', [ProductController::class, 'update']);
+            Route::delete('products/{id}', [ProductController::class, 'destroy']);
             Route::get('products', [ProductController::class, 'index']);
             Route::get('categories', [ProductController::class, 'categories']);
-            // Rapports & Analytics  
+            Route::post('/products/bulk-import', [ProductController::class, 'bulkImport']);
+            Route::post('/products/{product}/sync-modifiers', [ProductController::class, 'syncModifiers']);
+          // Routes pour les groupes de modificateurs
+            Route::apiResource('modifiers', ModifierController::class);
+            Route::apiResource('reservations', ReservationController::class);
+            Route::post('reservations/{id}/pay', [ReservationController::class, 'pay']);
+            // Routes spécifiques pour les items (options)
+            Route::post('modifiers/{modifier}/items', [ModifierController::class, 'addItem']);
+            Route::delete('modifier-items/{item}', [ModifierController::class, 'destroyItem']);
+            // Rapports & Analytics
             Route::get('reports/dashboard', [ReportController::class, 'dashboardStats']);
             Route::get('reports/categories', [ReportController::class, 'salesByCategory']);
             Route::get('analytics', [ReportController::class, 'getAnalytics']);
-              Route::get('reports/closing', [ReportController::class, 'closingReport']);
+            Route::get('reports/closing', [ReportController::class, 'closingReport']);
             Route::apiResource('tables', TableController::class);
             Route::patch('tables/{table}', [TableController::class, 'updateStatus']);
             // Inventaire (CRUD complet + Ajustements)
@@ -137,6 +151,8 @@ Route::middleware(['auth:sanctum'])->group(function () {
             Route::apiResource('purchase-orders', PurchaseOrderController::class);
             Route::get('products/{product}/recipe', [RecipeController::class, 'show']);
             Route::post('products/{product}/recipe', [RecipeController::class, 'store']);
+            Route::apiResource('commissions', CommissionController::class);
+            Route::post('/commissions/settle/{waiterId}', [CommissionController::class, 'settle']);
             Route::get('/settings', [SettingsController::class, 'index']);
             Route::post('/settings', [SettingsController::class, 'update']);
         });

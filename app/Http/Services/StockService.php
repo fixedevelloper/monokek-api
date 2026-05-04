@@ -9,7 +9,7 @@ class StockService {
     public static function deductFromOrder(Order $order) {
         foreach ($order->items as $orderItem) {
             $product = $orderItem->product;
-            
+            logger('lllllllllllllllllllll');
             // Si le produit a une recette
             if ($product->recipe) {
                 foreach ($product->recipe->items as $recipeItem) {

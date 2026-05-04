@@ -43,7 +43,7 @@ return new class extends Migration {
             $table->uuid()->unique();
             $table->string('name');
             $table->string('phone')->nullable();
-             $table->string('pin_code')->nullable();
+            $table->string('pin_code')->nullable();
             $table->string('email')->nullable()->unique();
             $table->string('password');
             $table->boolean('is_active')->default(true);
@@ -167,6 +167,11 @@ return new class extends Migration {
             $table->string('name');
             $table->text('description')->nullable();
             $table->decimal('price', 12, 2);
+            $table->decimal('incentive_amount', 10, 2)->nullable()->default(0);
+            $table->string('image')->nullable();
+            $table->enum('type', ['storable', 'consumable', 'service'])->default('storable');
+            $table->integer('stock_count')->default(0);
+            $table->integer('alert_stock')->default(0);
             $table->boolean('is_active')->default(true);
             $table->boolean('track_stock')->default(false);
             $table->timestamps();
@@ -198,9 +203,9 @@ return new class extends Migration {
             $table->id();
             $table->foreignId('modifier_id')->constrained()->cascadeOnDelete();
             $table->foreignId('product_id')->constrained()->cascadeOnDelete();
-            // Optionnel : un ordre d'affichage spécifique par produit
             $table->integer('sort_order')->default(0);
             $table->timestamps();
+            $table->unique(['modifier_id', 'product_id']);
         });
         /*
         |--------------------------------------------------------------------------
@@ -230,13 +235,15 @@ return new class extends Migration {
             $table->foreignId('branch_id')->constrained()->cascadeOnDelete();
             $table->foreignId('table_id')->nullable()->constrained('restaurant_tables')->nullOnDelete();
             $table->foreignId('customer_id')->nullable()->constrained()->nullOnDelete();
-            $table->foreignId('user_id')->constrained()->cascadeOnDelete();
+            $table->foreignId('user_id')->constrained()->cascadeOnDelete();//waiter_id
+            $table->foreignId('cashier_id')->constrained('users')->cascadeOnDelete();
             $table->string('type')->default('dinein'); // takeaway delivery
-            $table->enum('status', ['draft', 'pending_payment', 'pending', 'billing', 'paid', 'completed', 'cancelled','ready','preparing'])->default('draft');
+            $table->enum('status', ['draft', 'pending_payment', 'pending', 'billing', 'reserved', 'paid', 'completed', 'cancelled', 'ready', 'preparing'])->default('draft');
             $table->decimal('subtotal', 12, 2)->default(0);
             $table->decimal('tax', 12, 2)->default(0);
             $table->decimal('discount', 12, 2)->default(0);
             $table->decimal('total', 12, 2)->default(0);
+            $table->string('source')->nullable();
             $table->text('note')->nullable();
             $table->timestamp('paid_at')->nullable();
             $table->timestamps();
@@ -270,6 +277,34 @@ return new class extends Migration {
             $table->timestamps();
         });
 
+        Schema::create('reservations', function (Blueprint $table) {
+            $table->id();
+            $table->foreignId('order_id')->constrained()->onDelete('cascade');
+            $table->foreignId('customer_id')->constrained()->onDelete('cascade');
+
+            $table->dateTime('pickup_date'); // Date et heure de la venue
+            $table->integer('guests_count')->default(1);
+            $table->text('manager_notes')->nullable();
+            $table->enum('reservation_status', ['confirmed', 'arrived', 'no_show'])->default('confirmed');
+
+            $table->timestamps();
+        });
+        Schema::create('commissions', function (Blueprint $table) {
+            $table->id();
+            $table->foreignId('user_id')->constrained();
+            $table->foreignId('order_id')->constrained();
+            $table->foreignId('order_item_id')->nullable()->constrained()->onDelete('cascade');
+
+            $table->decimal('amount', 10, 2);
+            $table->float('percentage')->nullable();
+
+            // Type : 'global' (Option A) ou 'incentive' (Option C)
+            $table->enum('type', ['global', 'incentive'])->default('global');
+
+            $table->enum('status', ['pending', 'paid'])->default('pending');
+            $table->timestamp('paid_at')->nullable();
+            $table->timestamps();
+        });
         /*
         |--------------------------------------------------------------------------
         | KITCHEN

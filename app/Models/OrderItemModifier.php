@@ -9,7 +9,7 @@ class OrderItemModifier extends Model
 {
     // Pas de timestamps dans ta migration, donc on désactive
     public $timestamps = false;
-
+    protected $fillable = ['order_item_id', 'modifier_item_id', 'price', 'quantity'];
     protected $guarded = [];
 
     protected $casts = [

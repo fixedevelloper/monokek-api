@@ -11,11 +11,12 @@ class CategoryResource extends JsonResource
     {
         return [
             'id' => $this->id,
-            'created_at' => $this->created_at,
-            'updated_at' => $this->updated_at,
-            $this->mergeWhen(isset($this->name), [
-                'name' => $this->name,
-            ]),
+            'name' => $this->name,
+            // On inclut les produits uniquement s'ils ont été chargés (Eager Loading)
+            'products' => ProductResource::collection($this->whenLoaded('products')),
+
+            'created_at' => $this->created_at->format('Y-m-d H:i:s'),
+            'updated_at' => $this->updated_at->format('Y-m-d H:i:s'),
         ];
     }
 }

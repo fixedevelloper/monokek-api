@@ -13,6 +13,7 @@ class CustomerResource extends JsonResource
             'id' => $this->id,
             'created_at' => $this->created_at,
             'updated_at' => $this->updated_at,
+            'phone' => $this->phone,
             $this->mergeWhen(isset($this->name), [
                 'name' => $this->name,
             ]),

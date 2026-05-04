@@ -12,6 +12,7 @@ class OrderItemModifierResource extends JsonResource
         return [
             'id' => $this->id,
             'modifier_item_id' => $this->modifier_item_id,
+            'quantity' => $this->quantity,
             // On récupère le nom depuis la table des définitions (modifier_items)
             'name' => $this->whenLoaded('modifierItem', fn() => $this->modifierItem->name),
             'price' => (float) $this->price,

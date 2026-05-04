@@ -12,6 +12,7 @@ class ModifierItemResource extends JsonResource
         return [
             'id'    => $this->id,
             'name'  => $this->name,
+            'qty'  => $this->quantity,
             'price' => (float) $this->price, // Cast en float pour le JS
         ];
     }
