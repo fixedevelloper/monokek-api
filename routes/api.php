@@ -2,12 +2,15 @@
 
 use App\Http\Controllers\Api\Admin\CommissionController;
 use App\Http\Controllers\Api\Admin\IngredientController;
+use App\Http\Controllers\Api\Admin\LicenseController;
 use App\Http\Controllers\Api\Admin\ModifierController;
+use App\Http\Controllers\Api\Admin\PrinterController;
 use App\Http\Controllers\Api\Admin\PurchaseOrderController;
 use App\Http\Controllers\Api\Admin\RecipeController;
 use App\Http\Controllers\Api\Admin\ReservationController;
 use App\Http\Controllers\Api\Admin\SettingsController;
 use App\Http\Controllers\Api\Pos\CashController;
+use App\Models\PrintQueue;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -28,9 +31,14 @@ Route::post('login', [AuthController::class, 'login']);
 Route::get('/ping', function () {
     return response()->json(['status' => 'ok']);
 });
+Route::post('/license/activate', [LicenseController::class, 'activate']);
+Route::get('/license/status', [LicenseController::class, 'status']);
+
 // --- ROUTES PROTÉGÉES (SANCTUM) ---
 Route::middleware(['auth:sanctum'])->group(function () {
 
+    Route::post('/auth/update-pin', [AuthController::class, 'updatePin']);
+    Route::post('/auth/update-password', [AuthController::class, 'updatePassword']);
     // AUTH - Actions supplémentaires
     Route::post('logout', [AuthController::class, 'logout']);
     Route::post('auth/verify-pin', [AuthController::class, 'verifyPin']);
@@ -155,6 +163,20 @@ Route::middleware(['auth:sanctum'])->group(function () {
             Route::post('/commissions/settle/{waiterId}', [CommissionController::class, 'settle']);
             Route::get('/settings', [SettingsController::class, 'index']);
             Route::post('/settings', [SettingsController::class, 'update']);
+            Route::post('/settings', [SettingsController::class, 'update']);
+            Route::prefix('settings')->group(function () {
+                Route::apiResource('printers', PrinterController::class);
+                Route::get('printers/{printer}/test', [PrinterController::class, 'testConnection']);
+            });
+
         });
 });
-//});
+// routes/api.php
+Route::get('/print-queue/pending', function() {
+    return PrintQueue::where('status', 'pending')->with('printer')->get();
+});
+
+Route::post('/print-queue/{job}/mark-success', function(PrintQueue $job) {
+    $job->update(['status' => 'success']);
+    return response()->noContent();
+});

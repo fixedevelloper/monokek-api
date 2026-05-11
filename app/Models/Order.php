@@ -85,7 +85,7 @@ class Order extends Model
     {
         return $this->hasMany(OrderStatusHistory::class);
     }
-    // Dans App\Models\Order.php
+
 
 public function kitchenTickets(): HasMany
 {

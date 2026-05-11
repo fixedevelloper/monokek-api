@@ -20,23 +20,6 @@ return new class extends Migration {
         |--------------------------------------------------------------------------
         */
 
-        /*         Schema::create('roles', function (Blueprint $table) {
-                    $table->id();
-                    $table->string('name')->unique(); // admin cashier waiter kitchen manager
-                    $table->timestamps();
-                });
-
-                Schema::create('permissions', function (Blueprint $table) {
-                    $table->id();
-                    $table->string('name')->unique();
-                    $table->timestamps();
-                });
-
-                Schema::create('role_permissions', function (Blueprint $table) {
-                    $table->id();
-                    $table->foreignId('role_id')->constrained()->cascadeOnDelete();
-                    $table->foreignId('permission_id')->constrained()->cascadeOnDelete();
-                }); */
 
         Schema::create('users', function (Blueprint $table) {
             $table->id();
@@ -112,13 +95,29 @@ return new class extends Migration {
             $table->id();
             $table->foreignId('branch_id')->constrained()->cascadeOnDelete();
             $table->string('name');
-            $table->string('type'); // escpos
-            $table->string('connection'); // usb/lan
-            $table->string('ip')->nullable();
-            $table->string('port')->nullable();
+            $table->enum('type', ['escpos', 'label', 'pdf'])->default('escpos');
+            $table->enum('connection', ['usb', 'network', 'bt'])->default('network');
+            $table->string('location')->default('receipt'); // receipt, kitchen, bar, pizza, etc.
+            $table->string('ip')->nullable(); // Utile pour 'network'
+            $table->integer('port')->default(9100); // Port standard RAW
+            $table->integer('char_per_line')->default(42); // 80mm = 42-48 chars, 58mm = 32 chars
+            $table->boolean('is_active')->default(true);
+            $table->integer('paper_width')->default(58);
+            $table->boolean('use_beep')->default(true);
             $table->timestamps();
         });
-
+        Schema::create('print_queues', function (Blueprint $table) {
+            $table->id();
+            $table->foreignId('printer_id')->constrained('printers')->cascadeOnDelete();
+            $table->string('job_type'); // 'order', 'kitchen', 'bill'
+            $table->json('content');    // Données structurées (items, prix, table_no, etc.)
+            $table->integer('attempts')->default(0);
+            $table->enum('status', ['pending', 'printing', 'completed', 'failed'])->default('pending');
+            $table->text('error_message')->nullable();
+            $table->unsignedTinyInteger('priority')->default(1); // 1: Normal, 2: High, 3: Urgent
+            $table->timestamp('printed_at')->nullable(); // Pour savoir exactement quand le papier est sorti
+            $table->timestamps();
+        });
         /*
         |--------------------------------------------------------------------------
         | FLOOR / TABLES
@@ -249,10 +248,21 @@ return new class extends Migration {
             $table->timestamps();
             $table->index(['branch_id', 'status']);
         });
+        Schema::create('order_rounds', function (Blueprint $table) {
+            $table->id();
+            $table->foreignId('order_id')->constrained()->onDelete('cascade');
+            $table->integer('round_number')->default(1); // 1, 2, 3...
 
+            // Status pour savoir si la cuisine a terminé ce round précis
+            $table->enum('status', ['pending', 'sent', 'preparing', 'served'])->default('pending');
+
+            $table->text('note')->nullable(); // Note globale pour ce round (ex: "Tout envoyer en même temps")
+            $table->timestamp('sent_at')->nullable(); // Heure d'envoi en cuisine
+            $table->timestamps();
+        });
         Schema::create('order_items', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('order_id')->constrained()->cascadeOnDelete();
+            $table->foreignId('order_round_id')->constrained()->cascadeOnDelete();
             $table->foreignId('product_id')->constrained()->cascadeOnDelete();
             $table->foreignId('variant_id')->nullable()->constrained('product_variants')->nullOnDelete();
             $table->integer('qty');
@@ -266,7 +276,9 @@ return new class extends Migration {
             $table->id();
             $table->foreignId('order_item_id')->constrained()->cascadeOnDelete();
             $table->foreignId('modifier_item_id')->constrained()->cascadeOnDelete();
-            $table->decimal('price', 12, 2)->default(0);
+            $table->integer('quantity')->default(1);
+            $table->decimal('price', 12, 2)->default(0); // On définit le prix d'abord
+            $table->decimal('total', 12, 2)->virtualAs('quantity * price'); // Puis le calcul
         });
 
         Schema::create('order_status_histories', function (Blueprint $table) {

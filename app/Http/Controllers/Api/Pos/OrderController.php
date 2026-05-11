@@ -9,6 +9,7 @@ use App\Events\TicketCreated;
 use App\Http\Controllers\Controller;
 use App\Http\Helpers\Helpers;
 use App\Http\Services\CommissionService;
+use App\Http\Services\PrintService;
 use App\Http\Services\StockService;
 use App\Models\CashSession;
 use App\Models\Customer;
@@ -27,8 +28,11 @@ class OrderController extends Controller
 {
     /**
      * Étape 1 : Demande d'addition (La table passe en orange)
+     * @param Request $request
+     * @param PrintService $printService
+     * @return mixed
      */
-    public function requestBill(Request $request)
+    public function requestBill(Request $request, PrintService $printService)
     {
         $request->validate([
             'order_id' => 'nullable|exists:orders,id', // Important pour la modification
@@ -44,7 +48,7 @@ class OrderController extends Controller
             'total' => 'required|numeric',
         ]);
 
-        return DB::transaction(function () use ($request) {
+        return DB::transaction(function () use ($printService, $request) {
             $table = RestaurantTable::with('floor')->findOrFail($request->table_id);
 
             // 1. TROUVER OU CRÉER LA COMMANDE
@@ -58,7 +62,7 @@ class OrderController extends Controller
                     'table_id' => $table->id,
                     'user_id' => auth()->id(),
                     'cashier_id' => auth()->id(),
-                    'status' => 'pending_payment',
+                    'status' => 'pending',
                     'subtotal' => $request->subtotal,
                     'tax' => $request->tax ?? 0,
                     'total' => $request->total,
@@ -123,6 +127,14 @@ class OrderController extends Controller
             $table->update(['status' => 'billing']);
 
             broadcast(new OrderCreated($order))->toOthers();
+            // 1. Envoyer le reçu à la CAISSE
+            $printService->queueTicket($order, 'receipt', $order->branch_id);
+
+            // 2. Envoyer le bon de préparation à la CUISINE
+            $printService->queueTicket($order, 'kitchen', $order->branch_id);
+
+
+                $printService->queueTicket($order, 'bar', $order->branch_id);
 
             return new OrderResource($order->load(['items.product', 'items.modifiers.modifierItem', 'table']));
         });
@@ -133,9 +145,10 @@ class OrderController extends Controller
      * @param Request $request
      * @param $uuid
      * @param CommissionService $commissionService
+     * @param PrintService $printService
      * @return mixed
      */
-    public function finalizePayment(Request $request, $uuid,CommissionService $commissionService)
+    public function finalizePayment(Request $request, $uuid,CommissionService $commissionService, PrintService $printService)
     {
 
         // 1. Validation stricte des moyens de paiement
@@ -147,7 +160,7 @@ class OrderController extends Controller
         ]);
 
 
-        return DB::transaction(function () use ($commissionService, $request, $uuid) {
+        return DB::transaction(function () use ($printService, $commissionService, $request, $uuid) {
             // 1. Vérifier si l'utilisateur a une session de caisse ouverte
             $session = CashSession::where('user_id', auth()->id())
                 ->whereNull('closed_at')
@@ -196,7 +209,7 @@ class OrderController extends Controller
             // On génère l'argent pour le serveur !
             $commissionService->calculateCommissions($order);
             broadcast(new OrderStatusUpdated($order))->toOthers();
-
+            $printService->queueTicket($order, 'receipt', $order->branch_id);
             StockService::deductFromOrder($order);
             // 6. Retourner la référence pour le ticket
             return response()->json([
@@ -352,5 +365,12 @@ class OrderController extends Controller
         broadcast(new OrderStatusUpdated($order->load(['table', 'items'])))->toOthers();
 
         return response()->json(['message' => 'Commande servie !']);
+    }
+    public function reprint(Order $order, PrintService $printService)
+    {
+        // Impression manuelle (via votre bouton React)
+        $printService->queueTicket($order, 'receipt', $order->branch_id);
+
+        return response()->json(['message' => 'Impression lancée']);
     }
 }

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\Admin;
 
+use App\Models\Printer;
 use App\Models\Setting;
 use Illuminate\Http\Request;
 use App\Http\Controllers\Controller;
@@ -19,6 +20,8 @@ class SettingsController extends Controller
 
     /**
      * Mettre à jour plusieurs réglages à la fois
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
      */
     public function update(Request $request)
     {
@@ -39,6 +42,47 @@ class SettingsController extends Controller
         return response()->json([
             'message' => 'Configurations enregistrées',
             'data' => Setting::pluck('value', 'key')
+        ]);
+    }
+    public function printers()
+    {
+        // Retourne un objet propre : { "site_name": "Mon Resto", "tva": 20 }
+        return response()->json(Printer::all());
+    }
+    public function storePrint(Request $request)
+    {
+        $validated = $request->validate([
+            'branch_id'  => 'required|exists:branches,id',
+            'name'       => 'required|string|max:255',
+            'type'       => 'required|in:escpos,label',
+            'connection' => 'required|in:usb,network',
+            'ip'         => 'required_if:connection,network|nullable|ip',
+            'port'       => 'nullable|integer',
+        ]);
+
+        $printer = Printer::create($validated);
+
+        return response()->json([
+            'message' => 'Imprimante enregistrée avec succès',
+            'printer' => $printer
+        ]);
+    }
+    public function edtPrint(Request $request)
+    {
+        $validated = $request->validate([
+            'branch_id'  => 'required|exists:branches,id',
+            'name'       => 'required|string|max:255',
+            'type'       => 'required|in:escpos,label',
+            'connection' => 'required|in:usb,network',
+            'ip'         => 'required_if:connection,network|nullable|ip',
+            'port'       => 'nullable|integer',
+        ]);
+
+        $printer = Printer::create($validated);
+
+        return response()->json([
+            'message' => 'Imprimante enregistrée avec succès',
+            'printer' => $printer
         ]);
     }
 }

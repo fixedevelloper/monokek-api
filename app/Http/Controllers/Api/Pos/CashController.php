@@ -46,10 +46,12 @@ public function storeRegister(Request $request)
 
     /**
      * Ouvrir une nouvelle session de caisse
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
      */
     public function open(Request $request)
     {
-        logger($request->all());
+
         $request->validate([
             'register_id' => 'required|exists:cash_registers,id',
             'opening_amount' => 'required|numeric|min:0',
