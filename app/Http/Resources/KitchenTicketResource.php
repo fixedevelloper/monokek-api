@@ -11,25 +11,30 @@ class KitchenTicketResource extends JsonResource
     {
         return [
             'id' => $this->id,
-            'reference' => $this->order->reference,
-            'table' => $this->order->table ? $this->order->table->name : 'Emporté',
+            'reference' => $this->order->reference ?? 'N/A',
+            // Utilisation de l'opérateur null-safe pour plus de sécurité
+            'table' => $this->order->table->name ?? 'Emporté',
             'status' => $this->status,
+            'round_number' => $this->round->round_number ?? 1,
             'createdAt' => $this->created_at->format('H:i'),
 
-            'items' => $this->order->items
-                ->where('product.category.kitchen_station_id', $this->station_id)
-                ->map(function ($item) {
-                    return [
-                        'id' => $item->id,
-                        'name' => $item->product->name,
-                        'qty' => $item->qty,
-                        // Correction ici : on prend la quantité depuis $m (le pivot)
-                        'modifiers' => $item->modifiers->map(fn($m) => [
-                            'name' => $m->modifierItem->name,
-                            'quantity' => $m->quantity // <--- On utilise le champ de la table pivot
-                        ]),
-                    ];
-                })->values(),
+            /*
+               On transforme la collection d'items.
+               Si tu as déjà filtré dans le contrôleur via eager loading,
+               $this->round->items ne contiendra déjà que les bons items.
+            */
+            'items' => $this->round->items->map(function ($item) {
+                return [
+                    'id' => $item->id,
+                    'name' => $item->product->name ?? 'Produit inconnu',
+                    'qty' => $item->quantity, // Assure-toi que c'est 'quantity' ou 'qty' dans ta DB
+                    'modifiers' => $item->modifiers->map(fn($m) => [
+                        'name' => $m->modifierItem->name ?? 'N/A',
+                        'quantity' => $m->quantity
+                    ]),
+                    'notes' => $item->notes ?? '', // Toujours utile en cuisine
+                ];
+            })->values(),
         ];
     }
 }

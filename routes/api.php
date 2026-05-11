@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\Admin\RecipeController;
 use App\Http\Controllers\Api\Admin\ReservationController;
 use App\Http\Controllers\Api\Admin\SettingsController;
 use App\Http\Controllers\Api\Pos\CashController;
+use App\Models\CashRegister;
 use App\Models\PrintQueue;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -65,14 +66,14 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::get('orders/history', [OrderController::class, 'history']);
         Route::get('waiter/orders', [OrderController::class, 'waiterOrders']);
         Route::post('orders', [OrderController::class, 'store']);
-        Route::post('orders/request-bill', [OrderController::class, 'requestBill']);
+        Route::post('orders/send-round', [OrderController::class, 'sendRound']);
         Route::post('orders/{order}/finalize', [OrderController::class, 'finalizePayment']);
         Route::post('orders/{order}/serve', [OrderController::class, 'markAsServed']);
         Route::get('/tables/{table}/active-order', [OrderController::class, 'getActiveOrder']);
     });
     Route::prefix('cash')->group(function () {
         Route::get('/registers', function () {
-            return \App\Models\CashRegister::all();
+            return CashRegister::all();
         });
 
         // Enregistrer une nouvelle caisse

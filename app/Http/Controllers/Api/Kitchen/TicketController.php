@@ -30,7 +30,6 @@ class TicketController extends Controller
     }
     public function getStations()
     {
-        //$branchId = auth()->user()->branch_id; // Ou via un paramètre
 
         $stations = KitchenStation::query()
             ->withCount([
@@ -55,13 +54,20 @@ class TicketController extends Controller
             'station_id' => 'required|exists:kitchen_stations,id'
         ]);
 
-        $tickets = KitchenTicket::with([
-            'order.table',
-            'order.items.product.category',
-            'order.items.modifiers.modifierItem'
-        ])
-            ->where('station_id', $request->station_id)
+        $stationId = $request->station_id;
+
+        $tickets = KitchenTicket::where('station_id', $stationId)
             ->whereIn('status', ['pending', 'preparing'])
+            ->with([
+                'order.table',
+                'round',
+                'round.items' => function($query) use ($stationId) {
+                    // Use whereHas to filter items by their product's category station
+                    $query->whereHas('product.category', function($q) use ($stationId) {
+                        $q->where('kitchen_station_id', $stationId);
+                    })->with(['product', 'modifiers.modifierItem']);
+                }
+            ])
             ->orderBy('created_at', 'asc')
             ->get();
 
@@ -73,39 +79,49 @@ class TicketController extends Controller
             'status' => 'required|in:pending,preparing,ready,served'
         ]);
 
-        // 1. Mise à jour du ticket de cuisine spécifique
+        // 1. Mise à jour du ticket spécifique
         $ticket->update(['status' => $request->status]);
 
-        // 2. Récupération de la commande parente avec ses tickets
-        $order = $ticket->order;
-        $allTickets = $order->kitchenTickets;
+        // 2. On récupère le Round associé
+        $round = $ticket->round; // S'assurer que la relation 'round' est définie dans KitchenTicket
 
-        // 3. Logique de mise à jour automatique du statut de l'Order
-        $newOrderStatus = $order->status;
-
-
-        if ($allTickets->every(fn($t) => $t->status === 'ready')) {
-            // Si TOUTES les stations ont fini (ex: Pizza prête ET Boissons prêtes)
-            $newOrderStatus = 'ready';
-
-        } elseif ($allTickets->contains(fn($t) => $t->status === 'preparing')) {
-            // Si au moins une station a commencé
-            $newOrderStatus = 'preparing';
+        if (!$round) {
+            return response()->json(['error' => 'Round non trouvé pour ce ticket'], 404);
         }
 
-        if ($newOrderStatus !== $order->status) {
-            $order->update(['status' => $newOrderStatus]);
+        // 3. Mise à jour du statut du ROUND
+        // On utilise ->kitchenTickets()->get() pour éviter le null et forcer la collection
+        $allRoundTickets = $round->kitchenTickets()->get();
+
+        $newRoundStatus = $round->status;
+
+        if ($allRoundTickets->every(fn($t) => $t->status === 'ready')) {
+            $newRoundStatus = 'served';
+        } elseif ($allRoundTickets->contains(fn($t) => $t->status === 'preparing')) {
+            $newRoundStatus = 'preparing';
         }
-        // Déclencher la mise à jour pour la station concernée
+
+        if ($newRoundStatus !== $round->status) {
+            $round->update(['status' => $newRoundStatus]);
+        }
+
+        // 4. Mise à jour optionnelle de l'ORDER global
+        $order = $round->order;
+        if ($order) {
+            // Si tous les rounds de la commande sont 'ready', l'order passe à 'ready'
+            $allRounds = $order->rounds()->get();
+            if ($allRounds->every(fn($r) => $r->status === 'served')) {
+                $order->update(['status' => 'ready']);
+            }
+        }
+
+        // 5. Broadcasts
         broadcast(new KitchenStationUpdated($ticket->station))->toOthers();
-        // 4. Déclenchement de l'événement WebSocket pour l'Order
-        // On charge les relations nécessaires pour que le serveur sache quelle table est prête
-        broadcast(new OrderStatusUpdated($order->load(['table', 'items.product'])))->toOthers();
+        broadcast(new OrderStatusUpdated($order->load(['table'])))->toOthers();
 
         return response()->json([
-            'message' => "Ticket {$ticket->id} mis à jour, Order {$order->reference} est désormais {$newOrderStatus}",
-            'ticket_status' => $ticket->status,
-            'order_status' => $order->status
+            'message' => "Statut mis à jour",
+            'round_status' => $newRoundStatus
         ]);
     }
 }

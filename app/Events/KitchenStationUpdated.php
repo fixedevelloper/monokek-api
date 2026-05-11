@@ -1,8 +1,11 @@
 <?php
+
 namespace App\Events;
 
 use App\Models\KitchenStation;
+use App\Models\KitchenTicket;
 use Illuminate\Broadcasting\Channel;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Broadcasting\InteractsWithSockets;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
@@ -12,39 +15,52 @@ class KitchenStationUpdated implements ShouldBroadcast
 {
     use Dispatchable, InteractsWithSockets, SerializesModels;
 
-public $kitchenStation;
-    // On définit explicitement la propriété pour éviter l'erreur
-    public $pending_tickets_count; 
+    public $kitchenStation;
 
+    /**
+     * @param KitchenStation $kitchenStation
+     */
     public function __construct(KitchenStation $kitchenStation)
     {
+        // On passe l'instance de la station
         $this->kitchenStation = $kitchenStation;
-
-        // On compte manuellement
-        $this->pending_tickets_count = \DB::table('kitchen_tickets')
-            ->where('station_id', $kitchenStation->id)
-            ->whereIn('status', ['pending', 'preparing'])
-            ->count();
     }
 
+    /**
+     * Les canaux sur lesquels l'événement doit être diffusé.
+     */
     public function broadcastOn(): array
     {
-        // On peut diffuser sur un canal global ou spécifique à la station
-        return [new Channel('kitchen.stations')];
+        return [
+            new Channel('kitchen.stations'),
+            // Optionnel : canal spécifique pour ne pas saturer les autres stations
+            new Channel('kitchen.station.' . $this->kitchenStation->id)
+        ];
     }
 
+    /**
+     * Nom de l'événement diffusé.
+     */
     public function broadcastAs(): string
     {
         return 'station.updated';
     }
 
-public function broadcastWith(): array
+    /**
+     * Données à envoyer au frontend.
+     * On calcule le count ici pour qu'il soit frais au moment de l'envoi.
+     */
+    public function broadcastWith(): array
     {
+        $count = KitchenTicket::where('station_id', $this->kitchenStation->id)
+            ->whereIn('status', ['pending', 'preparing'])
+            ->count();
+
         return [
             'id' => $this->kitchenStation->id,
             'name' => $this->kitchenStation->name,
-            // On utilise la propriété de la classe
-            'pending_tickets_count' => (int) $this->pending_tickets_count
+            'pending_tickets_count' => (int) $count,
+            'updated_at' => now()->format('H:i:s'),
         ];
     }
 }

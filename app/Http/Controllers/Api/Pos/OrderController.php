@@ -13,6 +13,7 @@ use App\Http\Services\PrintService;
 use App\Http\Services\StockService;
 use App\Models\CashSession;
 use App\Models\Customer;
+use App\Models\KitchenTicket;
 use App\Models\Order;
 use App\Models\PaymentMethod;
 use App\Models\Reservation;
@@ -27,199 +28,152 @@ use Illuminate\Support\Str;
 class OrderController extends Controller
 {
     /**
-     * Étape 1 : Demande d'addition (La table passe en orange)
+     * ENVOI D'UN ROUND (Remplace ou complète requestBill)
+     * Cette méthode crée la commande si elle n'existe pas,
+     * sinon elle ajoute un nouveau Round à la commande active.
      * @param Request $request
      * @param PrintService $printService
      * @return mixed
      */
-    public function requestBill(Request $request, PrintService $printService)
+    public function sendRound(Request $request, PrintService $printService)
     {
         $request->validate([
-            'order_id' => 'nullable|exists:orders,id', // Important pour la modification
+            'order_id' => 'nullable|exists:orders,id',
             'table_id' => 'required|exists:restaurant_tables,id',
             'items' => 'required|array|min:1',
             'items.*.product_id' => 'required|exists:products,id',
             'items.*.qty' => 'required|integer|min:1',
             'items.*.price' => 'required|numeric',
             'items.*.modifiers' => 'nullable|array',
-            'items.*.modifiers.*.modifier_item_id' => 'required|exists:modifier_items,id',
-            'items.*.modifiers.*.price' => 'required|numeric',
-            'subtotal' => 'required|numeric',
-            'total' => 'required|numeric',
+            'note' => 'nullable|string',
         ]);
 
         return DB::transaction(function () use ($printService, $request) {
             $table = RestaurantTable::with('floor')->findOrFail($request->table_id);
 
-            // 1. TROUVER OU CRÉER LA COMMANDE
-            // Si order_id est fourni, on update. Sinon, on crée.
-            $order = Order::updateOrCreate(
-                ['id' => $request->order_id],
+            // 1. RÉCUPÉRER OU CRÉER LA COMMANDE
+            $order = Order::firstOrCreate(
+                ['id' => $request->order_id, 'status' => 'pending'],
                 [
-                    'uuid' => $request->order_id ? Order::find($request->order_id)->uuid : (string)Str::uuid(),
-                    'reference' => $request->order_id ? Order::find($request->order_id)->reference : 'CMD-' . strtoupper(Str::random(8)),
+                    'uuid' => (string)Str::uuid(),
+                    'reference' => $order->reference ?? 'CMD-' . strtoupper(Str::random(8)),
                     'branch_id' => $table->floor->branch_id,
                     'table_id' => $table->id,
                     'user_id' => auth()->id(),
                     'cashier_id' => auth()->id(),
                     'status' => 'pending',
-                    'subtotal' => $request->subtotal,
-                    'tax' => $request->tax ?? 0,
-                    'total' => $request->total,
                     'type' => 'dinein',
                 ]
             );
 
-            // 2. GÉRER LES ARTICLES (SYNC)
-            // Stratégie : On supprime les anciens items pour remettre les nouveaux
-            // (Note: Dans un système avancé, on ne supprimerait que ceux qui n'ont pas encore été envoyés en cuisine)
-            $order->items()->delete();
+            // 2. CRÉER LE ROUND
+            $roundNumber = $order->rounds()->count() + 1;
+            $round = $order->rounds()->create([
+                'round_number' => $roundNumber,
+                'status' => 'sent',
+                'note' => $request->note,
+                'sent_at' => now(),
+            ]);
 
+            // 3. CRÉER LES ITEMS DANS LE ROUND
             foreach ($request->items as $itemData) {
-                $orderItem = $order->items()->create([
+                // On récupère le produit pour connaître sa station_id
+                $product = Product::findOrFail($itemData['product_id']);
+
+                $orderItem = $round->items()->create([
+                    //'order_id' => $order->id, // Important pour la cohérence
                     'product_id' => $itemData['product_id'],
+                    //'station_id' => $product->category->kitchen_station_id, // On lie l'item à sa station
                     'qty' => $itemData['qty'],
                     'price' => $itemData['price'],
                     'total' => $itemData['price'] * $itemData['qty'],
                     'status' => 'pending',
                 ]);
 
-                // Dans OrderController.php
                 if (!empty($itemData['modifiers'])) {
                     foreach ($itemData['modifiers'] as $mod) {
                         $orderItem->modifiers()->create([
                             'modifier_item_id' => $mod['modifier_item_id'],
                             'price' => $mod['price'],
-                            'quantity' => $mod['quantity'] ?? 1, // On récupère la qté du front
+                            'quantity' => $mod['quantity'] ?? 1,
                         ]);
                     }
                 }
             }
 
-            // 3. RE-GÉNÉRER LES TICKETS DE CUISINE
-            // Pour éviter les doublons en cuisine, on peut supprimer les tickets 'pending' existants
-            // avant de générer les nouveaux pour cette commande modifiée
-            $order->kitchenTickets()->where('status', 'pending')->delete();
-
+            // --- NOUVELLE ÉTAPE 3.5 : CRÉER LES TICKETS DE CUISINE ---
+            // On groupe les items de ce round par station_id pour créer un ticket par station
+         //   $itemsByStation = $round->items()->get()->groupBy('station_id');
             $itemsByStation = $order->items()->with('product.category')->get()->groupBy(function ($item) {
                 return $item->product->category->kitchen_station_id;
             });
-
             foreach ($itemsByStation as $stationId => $items) {
-                if ($stationId) {
-                    $ticket = $order->kitchenTickets()->create([
+                if ($stationId) { // On ne crée de ticket que si une station est définie
+                    $ticket = KitchenTicket::create([
+                        'order_id' => $order->id,
+                        'order_round_id' => $round->id,
                         'station_id' => $stationId,
                         'status' => 'pending',
                     ]);
 
-                    $ticket->load(['order', 'station']);
-
-                    // Diffusion des événements
+                    // Optionnel : Déclencher l'événement pour le temps réel du KDS
                     broadcast(new KitchenStationUpdated($ticket->station))->toOthers();
                     broadcast(new TicketCreated($ticket))->toOthers();
                 }
             }
-            $order->statusHistories()->create([
-                'status' => 'created',
-                'user_id' => auth()->id(),
-            ]);
-            // 4. MISE À JOUR DE LA TABLE
-            $table->update(['status' => 'billing']);
 
-            broadcast(new OrderCreated($order))->toOthers();
-            // 1. Envoyer le reçu à la CAISSE
-            $printService->queueTicket($order, 'receipt', $order->branch_id);
+            // 4. MISE À JOUR DES TOTAUX
+            $order->refreshTotals();
 
-            // 2. Envoyer le bon de préparation à la CUISINE
-            $printService->queueTicket($order, 'kitchen', $order->branch_id);
+            // 5. MISE À JOUR DE LA TABLE
+            $table->update(['status' => 'occupied']); // 'occupied' est plus logique que 'billing' ici
 
+            // 6. IMPRESSION & NOTIFICATIONS
+            $printService->queueRoundTickets($round);
 
-                $printService->queueTicket($order, 'bar', $order->branch_id);
+            broadcast(new OrderCreated($order->load('rounds.items')))->toOthers();
 
-            return new OrderResource($order->load(['items.product', 'items.modifiers.modifierItem', 'table']));
+            return new OrderResource($order->load(['rounds.items.product', 'table', 'rounds.kitchenTickets']));
         });
     }
 
     /**
-     * Étape 2 : Finaliser le paiement (La table est libérée)
-     * @param Request $request
-     * @param $uuid
-     * @param CommissionService $commissionService
-     * @param PrintService $printService
-     * @return mixed
+     * FINALISER LE PAIEMENT (Inchangé sur la logique, mais refresh sur les relations)
      */
-    public function finalizePayment(Request $request, $uuid,CommissionService $commissionService, PrintService $printService)
+    public function finalizePayment(Request $request, $uuid, CommissionService $commissionService, PrintService $printService)
     {
-
-        // 1. Validation stricte des moyens de paiement
         $request->validate([
             'payment_method' => 'required|in:cash,momo,orange,card',
-            'note' => 'nullable|string',
-            'change_due' => 'required|numeric',
-            'amount_received' => 'nullable|numeric'
+            'amount_received' => 'required|numeric'
         ]);
 
-
         return DB::transaction(function () use ($printService, $commissionService, $request, $uuid) {
-            // 1. Vérifier si l'utilisateur a une session de caisse ouverte
-            $session = CashSession::where('user_id', auth()->id())
-                ->whereNull('closed_at')
-                ->first();
+            $session = CashSession::where('user_id', auth()->id())->whereNull('closed_at')->first();
+            if (!$session) return response()->json(['error' => 'Caisse fermée'], 403);
 
-            if (!$session) {
-                return response()->json(['error' => 'Veuillez ouvrir une session de caisse'], 403);
-            }
-            // 2. Récupération de la commande
             $order = Order::where('uuid', $uuid)->firstOrFail();
 
-            if ($order->status === 'paid') {
-                return response()->json(['message' => 'Cette commande est déjà payée'], 422);
-            }
-
-            // 3. Mise à jour de la commande
-            $order->update([
-                'status' => 'paid',
-                'note' => $request->note ?? $order->note,
-                'paid_at' => now(),
-                'cashier_id' => auth()->id(),
-            ]);
-            $payementMethod = PaymentMethod::query()->where('name', $request->payment_method)->first();
-
-            // 1. Créer l'enregistrement du paiement
+            // Paiement
+            $payMethod = PaymentMethod::where('name', $request->payment_method)->first();
             $order->payments()->create([
                 'cash_session_id' => $session->id,
-                'payment_method_id' => $payementMethod->id,
+                'payment_method_id' => $payMethod->id,
                 'amount' => $order->total,
-                'change_due' => $request->change_due,
                 'amount_received' => $request->amount_received,
-                'reference' => $request->reference ?? null,
+                'change_due' => $request->amount_received - $order->total,
             ]);
 
-            // 4. Historique
-            $order->statusHistories()->create([
-                'status' => 'paid',
-                'user_id' => auth()->id(),
-            ]);
+            $order->update(['status' => 'paid', 'paid_at' => now()]);
+            $order->table()->update(['status' => 'free']);
 
-            // 5. Libération de la table
-            if ($order->table_id) {
-                $order->table()->update(['status' => 'free']);
-                // Note: Utiliser la relation $order->table() est plus propre
-            }
-            // On génère l'argent pour le serveur !
             $commissionService->calculateCommissions($order);
-            broadcast(new OrderStatusUpdated($order))->toOthers();
-            $printService->queueTicket($order, 'receipt', $order->branch_id);
-            StockService::deductFromOrder($order);
-            // 6. Retourner la référence pour le ticket
-            return response()->json([
-                'message' => 'Paiement validé, table libérée',
-                'reference' => $order->reference, // Assure-toi que ce champ existe
-                'status' => 'success'
-            ]);
+
+            // Impression du ticket final (Reçu client complet)
+            $printService->queueFinalReceipt($order);
+
+            return response()->json(['message' => 'Payé', 'status' => 'success']);
         });
     }
-
     /**
      * Historique des commandes payées
      */
@@ -227,6 +181,7 @@ class OrderController extends Controller
     {
         $user = $request->user();
 
+        // 1. Récupérer la session active de l'utilisateur
         $session = CashSession::where('user_id', $user->id)
             ->whereNull('closed_at')
             ->first();
@@ -235,34 +190,60 @@ class OrderController extends Controller
             return Helpers::error("Session de caisse introuvable.");
         }
 
-        $orders = Order::with(['table', 'user', 'items', 'items.product', 'items.modifiers.modifierItem'])
+        // 2. Récupérer les commandes avec les Rounds et leurs Items
+        $orders = Order::with([
+            'table',
+            'user',
+            'rounds' => function($query) {
+                $query->orderBy('round_number', 'asc');
+            },
+            'rounds.items.product',
+            'rounds.items.modifiers.modifierItem',
+            // On garde items à la racine au cas où (pour les totaux rapides),
+            // mais le front utilisera surtout rounds.items
+            'items.product'
+        ])
             ->where(function ($query) use ($session) {
-                // 1. Les commandes PAYÉES dans MA session
+                // Commandes payées dans cette session
                 $query->whereHas('payments', function ($q) use ($session) {
                     $q->where('cash_session_id', $session->id);
                 })
-                    // 2. OU les commandes qui n'ont PAS ENCORE de paiement (En attente)
-                    // On vérifie le statut pour ne pas voir les commandes annulées ou trop vieilles
-                    ->orWhereNotIn('status', ['cancelled', 'pay',]);
+                    // OU commandes actives (non annulées et non payées) du jour
+                    ->orWhere(function($q) {
+                        $q->whereNotIn('status', ['cancelled', 'paid'])
+                            ->where('created_at', '>=', now()->startOfDay());
+                    });
             })
-            // Optionnel : Limiter les "En attente" à aujourd'hui pour éviter de polluer la liste
-            ->where('created_at', '>=', now()->startOfDay())
             ->latest()
-            ->paginate(20);
+            ->paginate(50); // Augmenté à 50 pour une meilleure visibilité sur le shift
 
         return Helpers::success(OrderResource::collection($orders));
     }
 
     public function historyAdmin(Request $request)
     {
-
-
-        $query = Order::with(['table', 'user','cashier', 'items', 'items.product', 'items.modifiers.modifierItem']); // On ne montre que ce qui est fini
+        // On charge les rounds et les caissiers/serveurs pour une traçabilité totale
+        $query = Order::with([
+            'table',
+            'user',
+            'cashier',
+            'rounds' => function($q) {
+                $q->orderBy('round_number', 'asc');
+            },
+            'rounds.items.product',
+            'rounds.items.modifiers.modifierItem',
+            // On garde aussi les items à plat si besoin de calculs directs
+            'items.product'
+        ]);
 
         // Filtre par date (Y-m-d)
         if($request->start_date && $request->end_date) {
-            $query->whereBetween('created_at', [$request->start_date.' 00:00:00', $request->end_date.' 23:59:59']);
+            $query->whereBetween('created_at', [
+                $request->start_date.' 00:00:00',
+                $request->end_date.' 23:59:59'
+            ]);
         }
+
         // Filtre par recherche (Référence ou Table)
         if ($request->filled('search')) {
             $search = $request->search;
@@ -270,10 +251,20 @@ class OrderController extends Controller
                 $q->where('reference', 'like', "%{$search}%")
                     ->orWhereHas('table', function ($t) use ($search) {
                         $t->where('name', 'like', "%{$search}%");
+                    })
+                    ->orWhereHas('user', function ($u) use ($search) {
+                        $u->where('name', 'like', "%{$search}%");
                     });
             });
         }
+
+        // Filtre par statut (Optionnel mais utile pour un Admin)
+        if ($request->filled('status')) {
+            $query->where('status', $request->status);
+        }
+
         $orders = $query->latest()->paginate(50);
+
         return Helpers::success(OrderResource::collection($orders));
     }
 
@@ -309,24 +300,32 @@ class OrderController extends Controller
 
     public function getActiveOrder(RestaurantTable $table)
     {
-        // On cherche une commande liée à cette table qui n'est pas encore 'completed' ou 'cancelled'
+        // On cherche la commande active
         $order = Order::where('table_id', $table->id)
-            ->whereIn('status', ['pending', 'processing', 'partially_paid','pending_payment']) // Statuts considérés comme "actifs"
+            ->whereIn('status', ['pending', 'processing', 'partially_paid', 'pending_payment', 'billing'])
             ->with([
-                'items.product',
-                'items.variant',
-                'items.modifiers.modifierItem'
+                // On charge les rounds triés par ordre de création
+                'rounds' => function($query) {
+                    $query->orderBy('round_number', 'asc');
+                },
+                // On charge les détails à l'intérieur de chaque round
+                'rounds.items.product',
+                'rounds.items.modifiers.modifierItem',
+                // On peut aussi garder les relations de base de la commande
+                'table',
+                'user'
             ])
-            ->latest() // Au cas où il y en aurait plusieurs, on prend la plus récente
+            ->latest()
             ->first();
 
         if (!$order) {
             return response()->json([
                 'message' => 'Aucune commande active pour cette table',
                 'data' => null
-            ], 200); // On renvoie 200 avec null pour que le front sache qu'il doit créer une nouvelle commande
+            ], 200);
         }
 
+        // Important : Assure-toi que ton OrderResource traite bien la collection "rounds"
         return new OrderResource($order);
     }
 

@@ -35,7 +35,7 @@ class OrderResource extends JsonResource
                 'id' => $this->cashier_id,
                 'name' => $this->whenLoaded('cashier', fn() => $this->cashier->name),
             ],
-            'items' => OrderItemResource::collection($this->whenLoaded('items')),
+            'rounds' => OrderRoundResource::collection($this->whenLoaded('rounds')),
 
             'note' => $this->note,
             'created_at' => $this->created_at->format('H:i'), // Utile pour le temps d'attente

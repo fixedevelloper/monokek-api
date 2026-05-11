@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class KitchenTicket extends Model
 {
-    protected $fillable = ['order_id', 'station_id', 'status'];
+    protected $fillable = ['order_id', 'station_id', 'status','order_round_id'];
 
     /**
      * Statuts possibles pour un ticket.
@@ -31,5 +31,16 @@ class KitchenTicket extends Model
     public function station(): BelongsTo
     {
         return $this->belongsTo(KitchenStation::class, 'station_id');
+    }
+    public function round()
+    {
+        return $this->belongsTo(OrderRound::class, 'order_round_id');
+    }
+
+    public function items()
+    {
+        // Récupère les items du round qui appartiennent à la même station que le ticket
+        return $this->hasMany(OrderItem::class, 'order_round_id', 'order_round_id')
+            ->where('station_id', $this->station_id);
     }
 }

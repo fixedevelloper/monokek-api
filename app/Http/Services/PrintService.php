@@ -3,59 +3,101 @@
 
 namespace App\Http\Services;
 
-use App\Models\PrintQueue;
+
 use App\Models\Printer;
+use App\Models\PrintQueue;
 use App\Events\PrintJobCreated;
 
 class PrintService
 {
     /**
-     * Envoie un ticket dans la file d'attente selon sa destination
-     *
-     * @param $order    L'objet commande
-     * @param $location La destination (receipt, kitchen, bar, pizza, etc.)
-     * @param $branchId L'ID de la branche
+     * Gère l'impression d'un Round spécifique
+     * Distribue les articles aux imprimantes concernées (Cuisine, Bar, etc.)
      */
-    public function queueTicket($order, $location, $branchId)
+    public function queueRoundTickets($round)
     {
-        // 1. Trouver l'imprimante configurée pour cette destination précise
-        // On cherche une imprimante active qui correspond à la "location"
-        $printer = Printer::where('branch_id', $branchId)
-            ->where('location', $location) // "kitchen", "bar", etc.
-            ->where('is_active', true)
-            ->first();
+        // 1. Charger les données nécessaires avec les relations
+        $round->load([
+            'order.table',
+            'order.user',
+            'items.product.category' // Assure-toi que la catégorie a une station_id ou location
+        ]);
 
-        // Fallback : Si aucune imprimante spécifique n'est trouvée pour la cuisine,
-        // on peut chercher l'imprimante par défaut (receipt)
-        if (!$printer) {
-            $printer = Printer::where('branch_id', $branchId)
-                ->where('location', 'receipt')
+        // 2. Grouper les articles par leur destination d'impression
+        // On assume que chaque produit ou sa catégorie pointe vers une 'location' (ex: kitchen, bar)
+        $itemsByLocation = $round->items->groupBy(function($item) {
+            return $item->product->printing_location ?? 'kitchen';
+        });
+
+        $jobs = [];
+
+        foreach ($itemsByLocation as $location => $items) {
+            // 3. Trouver l'imprimante dédiée à cette zone
+            $printer = Printer::where('branch_id', $round->order->branch_id)
+                ->where('location', $location)
+                ->where('is_active', true)
                 ->first();
+
+            // Fallback sur l'imprimante de reçu si la destination n'a pas d'imprimante
+            if (!$printer) {
+                $printer = Printer::where('branch_id', $round->order->branch_id)
+                    ->where('location', 'receipt')
+                    ->first();
+            }
+
+            if (!$printer) continue;
+
+            // 4. Créer le job d'impression pour ce groupe d'articles
+            $job = PrintQueue::create([
+                'printer_id' => $printer->id,
+                'job_type'   => $location,
+                'content'    => [
+                    'round_info' => [
+                        'number' => $round->round_number,
+                        'note'   => $round->note,
+                    ],
+                    'order' => [
+                        'reference' => $round->order->reference,
+                        'table'     => $round->order->table->name ?? 'N/A',
+                        'waiter'    => $round->order->user->name ?? 'Système',
+                        'items'     => $items->load('modifiers.modifierItem'), // Détails importants
+                    ],
+                    'timestamp' => now()->toDateTimeString(),
+                ],
+                'status' => 'pending',
+            ]);
+
+            // 5. Notifier le frontend (Tauri)
+            broadcast(new PrintJobCreated($job))->toOthers();
+            $jobs[] = $job;
         }
+
+        return $jobs;
+    }
+
+    /**
+     * Garder la méthode simple pour l'impression de la FACTURE finale (Receipt)
+     */
+    public function queueFinalReceipt($order)
+    {
+        $printer = Printer::where('branch_id', $order->branch_id)
+            ->where('location', 'receipt')
+            ->first();
 
         if (!$printer) return null;
 
-        // 2. Créer le job dans la queue
         $job = PrintQueue::create([
             'printer_id' => $printer->id,
-            'job_type'   => $location, // On garde la destination comme type de job
+            'job_type'   => 'receipt',
             'content'    => [
-                'order' => $order->load([
-                    'items.product',
-                    'items.modifiers.modifierItem',
-                    'customer',
-                    'cashier',
-                    'table' // Ne pas oublier la table pour la cuisine !
-                ]),
+                'order' => $order->load(['items.product', 'payments', 'customer', 'table']),
+                'is_final' => true,
                 'timestamp' => now()->toDateTimeString(),
             ],
             'status' => 'pending',
         ]);
 
-        // 3. Déclencher l'événement via WebSockets (Pusher/Soketi)
-        // Le frontend Tauri écoute et lancera l'impression dès réception
         broadcast(new PrintJobCreated($job))->toOthers();
-
         return $job;
     }
 }

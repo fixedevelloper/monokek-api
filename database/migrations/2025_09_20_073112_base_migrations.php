@@ -332,9 +332,21 @@ return new class extends Migration {
 
         Schema::create('kitchen_tickets', function (Blueprint $table) {
             $table->id();
+            // Le lien vital : chaque ticket correspond à UN round spécifique
+            $table->foreignId('order_round_id')->constrained('order_rounds')->cascadeOnDelete();
+
+            // On garde l'order_id pour des requêtes rapides (facultatif mais recommandé)
             $table->foreignId('order_id')->constrained()->cascadeOnDelete();
+
+            // La station (Cuisine, Bar, Grill, etc.)
             $table->foreignId('station_id')->constrained('kitchen_stations')->cascadeOnDelete();
+
+            // Status: pending (en attente), preparing (en cours), ready (prêt), served (servi)
             $table->string('status')->default('pending');
+
+            // Optionnel : pour trier par priorité ou type
+            $table->integer('priority')->default(1);
+
             $table->timestamps();
         });
 
