@@ -358,9 +358,8 @@ class OrderController extends Controller
         $order->update(['status' => 'completed']);
 
         // 2. On met à jour tous les tickets de cuisine liés à 'served'
-        $order->kitchenTickets()->update(['status' => 'served']);
+        $order->kitchenTickets()->update(['kitchen_tickets.status' => 'served']);
 
-        // 3. On broadcast l'info pour que la Caisse et le Serveur voient le changement
         broadcast(new OrderStatusUpdated($order->load(['table', 'items'])))->toOthers();
 
         return response()->json(['message' => 'Commande servie !']);

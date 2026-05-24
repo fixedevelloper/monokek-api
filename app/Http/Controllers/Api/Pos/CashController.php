@@ -12,7 +12,6 @@ use Carbon\Carbon;
 
 class CashController extends Controller
 {
-    // App/Http/Controllers/Api/CashController.php
 
 public function storeRegister(Request $request)
 {
