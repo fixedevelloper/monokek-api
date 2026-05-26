@@ -7,6 +7,7 @@ use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Illuminate\Support\Facades\DB;
 use Carbon\Carbon;
 
@@ -149,7 +150,10 @@ class ReportController extends Controller
 
         // 7. Top 5 des produits les plus vendus
         $topProducts = OrderItem::join('products', 'order_items.product_id', '=', 'products.id')
-            ->join('orders', 'order_items.order_id', '=', 'orders.id')
+            // 1. On passe d'abord de l'item vers son round (ajoute le bon nom de colonne : round_id ou order_round_id)
+            ->join('order_rounds', 'order_items.order_round_id', '=', 'order_rounds.id')
+            // 2. On lie ensuite le round à la commande globale
+            ->join('orders', 'order_rounds.order_id', '=', 'orders.id')
             ->whereBetween('orders.created_at', [$start, $end])
             ->where('orders.status', 'paid')
             ->select(

@@ -131,7 +131,7 @@ class OrderController extends Controller
             // 6. IMPRESSION & NOTIFICATIONS
             $printService->queueRoundTickets($round);
 
-            broadcast(new OrderCreated($order->load('rounds.items')))->toOthers();
+            broadcast(new OrderCreated($order->load(['rounds.items','rounds.items.product'])))->toOthers();
 
             return new OrderResource($order->load(['rounds.items.product', 'table', 'rounds.kitchenTickets']));
         });
@@ -170,7 +170,7 @@ class OrderController extends Controller
 
             // Impression du ticket final (Reçu client complet)
             $printService->queueFinalReceipt($order);
-
+            broadcast(new OrderStatusUpdated($order->load(['rounds.items','rounds.items.product','table'])))->toOthers();
             return response()->json(['message' => 'Payé', 'status' => 'success']);
         });
     }
@@ -360,7 +360,7 @@ class OrderController extends Controller
         // 2. On met à jour tous les tickets de cuisine liés à 'served'
         $order->kitchenTickets()->update(['kitchen_tickets.status' => 'served']);
 
-        broadcast(new OrderStatusUpdated($order->load(['table', 'items'])))->toOthers();
+        broadcast(new OrderStatusUpdated($order->load(['rounds.items','rounds.items.product','table'])))->toOthers();
 
         return response()->json(['message' => 'Commande servie !']);
     }

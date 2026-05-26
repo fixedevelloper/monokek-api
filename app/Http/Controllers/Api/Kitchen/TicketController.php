@@ -117,7 +117,7 @@ class TicketController extends Controller
 
         // 5. Broadcasts
         broadcast(new KitchenStationUpdated($ticket->station))->toOthers();
-        broadcast(new OrderStatusUpdated($order->load(['table'])))->toOthers();
+        broadcast(new OrderStatusUpdated($order->load(['rounds.items','rounds.items.product','table'])))->toOthers();
 
         return response()->json([
             'message' => "Statut mis à jour",

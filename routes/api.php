@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\Admin\AccountingController;
 use App\Http\Controllers\Api\Admin\CommissionController;
 use App\Http\Controllers\Api\Admin\IngredientController;
 use App\Http\Controllers\Api\Admin\LicenseController;
@@ -14,8 +15,6 @@ use App\Models\CashRegister;
 use App\Models\PrintQueue;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
-
-// Imports des Controllers
 use App\Http\Controllers\Api\Auth\AuthController;
 use App\Http\Controllers\Api\Pos\ProductController;
 use App\Http\Controllers\Api\Pos\OrderController;
@@ -24,8 +23,6 @@ use App\Http\Controllers\Api\Kitchen\TicketController;
 use App\Http\Controllers\Api\Admin\ReportController;
 use App\Http\Controllers\Api\Admin\InventoryController;
 use App\Http\Controllers\Api\Admin\StaffController;
-
-//Route::prefix('v1')->group(function () {
 
 // --- ROUTES PUBLIQUES ---
 Route::post('login', [AuthController::class, 'login']);
@@ -92,18 +89,9 @@ Route::middleware(['auth:sanctum'])->group(function () {
     });
     // ESPACE CUISINE (KDS - Kitchen Display System)
     Route::prefix('kitchen')->group(function () {
-        // Liste des stations (pour la page de sélection /kitchen)
         Route::get('stations', [TicketController::class, 'getStations']);
-
-        // Liste des tickets pour une station précise
         Route::get('tickets', [TicketController::class, 'index']);
-
-        // Mise à jour du statut d'un ticket complet (ex: de 'pending' à 'ready')
-        // On utilise l'ID du KitchenTicket
         Route::patch('tickets/{ticket}/status', [TicketController::class, 'updateStatus']);
-
-        // Mise à jour du statut d'un article précis dans un ticket
-        // Utile si le cuisinier veut marquer un plat comme "en cours" individuellement
         Route::patch('tickets/items/{item}/status', [TicketController::class, 'updateItemStatus']);
     });
 
@@ -172,12 +160,22 @@ Route::middleware(['auth:sanctum'])->group(function () {
 
         });
 });
-// routes/api.php
+
+Route::middleware(['auth:sanctum'])->prefix('accounting')->group(function () {
+    Route::get('/sales-summary', [AccountingController::class, 'salesSummary']);
+    Route::get('/payments-breakdown', [AccountingController::class, 'paymentsBreakdown']);
+    Route::get('/detailed-sales', [AccountingController::class, 'detailedSales']);
+    Route::get('/categories-sales', [AccountingController::class, 'categoriesSales']);
+});
 Route::get('/print-queue/pending', function() {
     return PrintQueue::where('status', 'pending')->with('printer')->get();
 });
 
 Route::post('/print-queue/{job}/mark-success', function(PrintQueue $job) {
     $job->update(['status' => 'success']);
+    return response()->noContent();
+});
+Route::post('/print-queue/{job}/mark-failed', function(PrintQueue $job) {
+    $job->update(['status' => 'failed']);
     return response()->noContent();
 });

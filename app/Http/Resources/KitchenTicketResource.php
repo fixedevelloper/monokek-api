@@ -27,7 +27,7 @@ class KitchenTicketResource extends JsonResource
                 return [
                     'id' => $item->id,
                     'name' => $item->product->name ?? 'Produit inconnu',
-                    'qty' => $item->quantity, // Assure-toi que c'est 'quantity' ou 'qty' dans ta DB
+                    'qty' => $item->qty,
                     'modifiers' => $item->modifiers->map(fn($m) => [
                         'name' => $m->modifierItem->name ?? 'N/A',
                         'quantity' => $m->quantity
