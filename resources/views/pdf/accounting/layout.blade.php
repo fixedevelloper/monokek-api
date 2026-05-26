@@ -72,10 +72,10 @@
 
 <div class="header">
     @php
-        // On utilise ton helper statique get() pour cibler précisément la bonne clé
-        $companyName = \App\Models\Setting::get('name', 'Monekek');
-        $companyPhone = \App\Models\Setting::get('phone', '');
-        $companyAddress = \App\Models\Setting::get('address', '');
+
+        $companyName = \App\Models\Setting::get('store_name', 'Monekek');
+        $companyPhone = \App\Models\Setting::get('store_phone', '');
+        $companyAddress = \App\Models\Setting::get('store_address', '');
     @endphp
 
     <table style="border: none; margin: 0; width: 100%;">
