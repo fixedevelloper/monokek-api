@@ -20,7 +20,7 @@ class PrintService
         $round->load([
             'order.table',
             'order.user',
-            'items.product.category' // Assure-toi que la catégorie a une station_id ou location
+            'items.product.category'
         ]);
 
         // 2. Grouper les articles par leur destination d'impression
@@ -67,7 +67,6 @@ class PrintService
                 'status' => 'pending',
             ]);
 
-            // 5. Notifier le frontend (Tauri)
             broadcast(new PrintJobCreated($job))->toOthers();
             $jobs[] = $job;
         }
@@ -90,7 +89,14 @@ class PrintService
             'printer_id' => $printer->id,
             'job_type'   => 'receipt',
             'content'    => [
-                'order' => $order->load(['items.product', 'payments', 'customer', 'table']),
+                // On charge les rounds, et pour chaque round, ses items et leurs produits respectifs
+                'order' => $order->load([
+                    'rounds.items.product',
+                    'rounds.items.modifiers',
+                    'payments.paymentMethod',
+                    'customer',
+                    'table'
+                ]),
                 'is_final' => true,
                 'timestamp' => now()->toDateTimeString(),
             ],
