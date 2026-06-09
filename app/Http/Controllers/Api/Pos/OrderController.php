@@ -367,7 +367,7 @@ class OrderController extends Controller
     public function reprint(Order $order, PrintService $printService)
     {
         // Impression manuelle (via votre bouton React)
-        $printService->queueTicket($order, 'receipt', $order->branch_id);
+        $printService->queueFinalReceipt($order);
 
         return response()->json(['message' => 'Impression lancée']);
     }

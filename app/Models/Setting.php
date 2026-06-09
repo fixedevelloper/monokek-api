@@ -15,7 +15,7 @@ class Setting extends Model
      * Cast de la valeur pour gérer les types complexes (JSON)
      */
     protected $casts = [
-        'value' => 'json', 
+        'value' => 'json',
     ];
 
     /**
@@ -25,5 +25,18 @@ class Setting extends Model
     {
         $setting = self::where('key', $key)->first();
         return $setting ? $setting->value : $default;
+    }
+    public static function getStoreInfos()
+    {
+        $storeKeys = ['store_name', 'store_logo', 'store_address', 'store_phone', 'store_bp'];
+        $settings = self::whereIn('key', $storeKeys)->get();
+
+        $storeData = [];
+        foreach ($storeKeys as $key) {
+            $setting = $settings->firstWhere('key', $key);
+            $storeData[$key] = $setting ? $setting->value : null;
+        }
+
+        return $storeData;
     }
 }

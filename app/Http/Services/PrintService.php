@@ -7,6 +7,7 @@ namespace App\Http\Services;
 use App\Models\Printer;
 use App\Models\PrintQueue;
 use App\Events\PrintJobCreated;
+use App\Models\Setting;
 
 class PrintService
 {
@@ -76,6 +77,8 @@ class PrintService
 
     /**
      * Garder la méthode simple pour l'impression de la FACTURE finale (Receipt)
+     * @param $order
+     * @return |null
      */
     public function queueFinalReceipt($order)
     {
@@ -85,11 +88,11 @@ class PrintService
 
         if (!$printer) return null;
 
+
         $job = PrintQueue::create([
             'printer_id' => $printer->id,
             'job_type'   => 'receipt',
             'content'    => [
-                // On charge les rounds, et pour chaque round, ses items et leurs produits respectifs
                 'order' => $order->load([
                     'rounds.items.product',
                     'rounds.items.modifiers',
@@ -97,6 +100,8 @@ class PrintService
                     'customer',
                     'table'
                 ]),
+                // 2. Injection du tableau store reconstruit à la racine
+                'store' => Setting::getStoreInfos(), // Appel direct ici
                 'is_final' => true,
                 'timestamp' => now()->toDateTimeString(),
             ],

@@ -94,7 +94,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::patch('tickets/{ticket}/status', [TicketController::class, 'updateStatus']);
         Route::patch('tickets/items/{item}/status', [TicketController::class, 'updateItemStatus']);
     });
-
+    Route::get('/admin/settings', [SettingsController::class, 'index']);
     // ESPACE ADMIN (Accès restreint par rôle)
     // Note: Assure-toi que ton middleware 'role' est bien enregistré dans Kernel.php
     Route::middleware(['auth:sanctum', 'role:admin|manager'])
@@ -150,7 +150,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
             Route::post('products/{product}/recipe', [RecipeController::class, 'store']);
             Route::apiResource('commissions', CommissionController::class);
             Route::post('/commissions/settle/{waiterId}', [CommissionController::class, 'settle']);
-            Route::get('/settings', [SettingsController::class, 'index']);
+
             Route::post('/settings', [SettingsController::class, 'update']);
             Route::post('/settings', [SettingsController::class, 'update']);
             Route::prefix('settings')->group(function () {
@@ -161,6 +161,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
         });
 });
 
+Route::post('/sales/{order}/reprint',[OrderController::class,'reprint']);
 Route::middleware(['auth:sanctum'])->prefix('accounting')->group(function () {
     Route::get('/sales-summary', [AccountingController::class, 'salesSummary']);
     Route::get('/payments-breakdown', [AccountingController::class, 'paymentsBreakdown']);
