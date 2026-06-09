@@ -88,21 +88,22 @@ class PrintService
 
         if (!$printer) return null;
 
-
         $job = PrintQueue::create([
             'printer_id' => $printer->id,
             'job_type'   => 'receipt',
             'content'    => [
+                // Nettoyage et optimisation des chargements de relations
                 'order' => $order->load([
                     'rounds.items.product',
                     'rounds.items.modifiers',
-                    'payments.paymentMethod',
+                    'payments.paymentMethod', // Charge les paiements ET la méthode associée d'un coup
                     'customer',
-                    'table'
+                    'table',
+                    'user',                   // Le serveur (créateur de la commande)
+                    'cashier'                 // Le caissier
                 ]),
-                // 2. Injection du tableau store reconstruit à la racine
-                'store' => Setting::getStoreInfos(), // Appel direct ici
-                'is_final' => true,
+                'store'     => Setting::getStoreInfos(),
+                'is_final'  => true,
                 'timestamp' => now()->toDateTimeString(),
             ],
             'status' => 'pending',
