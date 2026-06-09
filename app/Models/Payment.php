@@ -30,4 +30,11 @@ class Payment extends Model
     {
         return $this->belongsTo(PaymentMethod::class, 'payment_method_id');
     }
+    /**
+     * Le mode de paiement utilisé
+     */
+    public function paymentMethod(): BelongsTo // <-- Change "method" to "paymentMethod"
+    {
+        return $this->belongsTo(PaymentMethod::class, 'payment_method_id');
+    }
 }
