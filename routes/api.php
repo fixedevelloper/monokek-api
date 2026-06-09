@@ -172,7 +172,7 @@ Route::get('/print-queue/pending', function() {
 });
 
 Route::post('/print-queue/{job}/mark-success', function(PrintQueue $job) {
-    $job->update(['status' => 'success']);
+    $job->update(['status' => 'completed']);
     return response()->noContent();
 });
 Route::post('/print-queue/{job}/mark-failed', function(PrintQueue $job) {
