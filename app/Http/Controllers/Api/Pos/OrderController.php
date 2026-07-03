@@ -174,8 +174,11 @@ class OrderController extends Controller
             return response()->json(['message' => 'Payé', 'status' => 'success']);
         });
     }
+
     /**
      * Historique des commandes payées
+     * @param Request $request
+     * @return
      */
     public function history(Request $request)
     {
@@ -270,7 +273,15 @@ class OrderController extends Controller
 
     public function index(Request $request)
     {
-        $query = Order::query()->with(['table', 'user']);
+        $query = Order::query()->with([
+            'table',
+            'user',
+            'rounds' => function ($q) {
+                $q->orderBy('round_number', 'asc');
+            },
+            'rounds.items.product',
+            'rounds.items.modifiers.modifierItem',
+        ]);
 
         // Filtre par recherche (Référence ou Table)
         if ($request->filled('search')) {
@@ -292,7 +303,6 @@ class OrderController extends Controller
             $query->where('status', $request->status);
         }
 
-        // Pagination pour éviter de surcharger Tauri
         $orders = $query->latest()->paginate(15);
 
         return OrderResource::collection($orders);

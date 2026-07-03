@@ -11,6 +11,7 @@ use App\Models\Order;
 use App\Models\OrderItem;
 use Illuminate\Http\Request;
 use App\Http\Resources\KitchenTicketResource;
+use Illuminate\Support\Facades\DB;
 
 class TicketController extends Controller
 {
@@ -101,6 +102,7 @@ class TicketController extends Controller
             $newRoundStatus = 'preparing';
         }
 
+
         if ($newRoundStatus !== $round->status) {
             $round->update(['status' => $newRoundStatus]);
         }
@@ -124,4 +126,69 @@ class TicketController extends Controller
             'round_status' => $newRoundStatus
         ]);
     }
-}
+    public function updateStatusDirect(Request $request, KitchenTicket $ticket)
+    {
+        $request->validate([
+            'status' => 'required|in:pending,preparing,ready,served'
+        ]);
+
+        return DB::transaction(function () use ($request, $ticket) {
+            // 1. Mise à jour du ticket spécifique
+            $ticket->update(['status' => $request->status]);
+
+            // 2. On récupère le Round associé (avec verrou pour éviter les races conditions
+            // si plusieurs tickets du même round sont mis à jour en parallèle)
+            $round = $ticket->round()->lockForUpdate()->first();
+
+            if (!$round) {
+                return response()->json(['error' => 'Round non trouvé pour ce ticket'], 404);
+            }
+            if ($request->status=='served'){
+                $round->update(['status' => 'served']);
+            }
+            // 3. Mise à jour du statut du ROUND
+            $allRoundTickets = $round->kitchenTickets()->get();
+
+            $newRoundStatus = $round->status;
+
+            if ($allRoundTickets->isNotEmpty() && $allRoundTickets->every(fn($t) => $t->status === 'ready')) {
+                $newRoundStatus = 'served';
+            } elseif ($allRoundTickets->contains(fn($t) => $t->status === 'preparing')) {
+                $newRoundStatus = 'preparing';
+            }
+
+            logger($newRoundStatus);
+            if ($newRoundStatus !== $round->status) {
+                $round->update(['status' => $newRoundStatus]);
+            }
+
+            // 4. Mise à jour optionnelle de l'ORDER global
+            // Si tous les rounds de la commande sont 'served', l'order passe à 'completed'
+            $order = $round->order;
+
+            if ($order) {
+                $allRounds = $order->rounds()->get();
+
+                if ($allRounds->isNotEmpty()
+                    && $allRounds->every(fn($r) => $r->status === 'served')
+                    && $order->status !== 'completed'
+                ) {
+                    $order->update(['status' => 'completed']);
+                }
+            }
+
+            // 5. Broadcasts
+            broadcast(new KitchenStationUpdated($ticket->station))->toOthers();
+
+            if ($order) {
+                broadcast(new OrderStatusUpdated(
+                    $order->load(['rounds.items', 'rounds.items.product', 'table'])
+                ))->toOthers();
+            }
+
+            return response()->json([
+                'message'      => "Statut mis à jour",
+                'round_status' => $newRoundStatus,
+            ]);
+        });
+    }}

@@ -21,5 +21,8 @@ class RestaurantTable extends Model
     public function floor() {
         return $this->belongsTo(Floor::class);
     }
-
+    public function orders()
+    {
+        return $this->hasMany(Order::class, 'table_id');
+    }
 }

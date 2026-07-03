@@ -93,6 +93,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::get('tickets', [TicketController::class, 'index']);
         Route::patch('tickets/{ticket}/status', [TicketController::class, 'updateStatus']);
         Route::patch('tickets/items/{item}/status', [TicketController::class, 'updateItemStatus']);
+        Route::patch('tickets-direct/{ticket}/status', [TicketController::class, 'updateStatusDirect']);
     });
     Route::get('/admin/settings', [SettingsController::class, 'index']);
     // ESPACE ADMIN (Accès restreint par rôle)
