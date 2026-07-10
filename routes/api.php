@@ -11,6 +11,7 @@ use App\Http\Controllers\Api\Admin\RecipeController;
 use App\Http\Controllers\Api\Admin\ReservationController;
 use App\Http\Controllers\Api\Admin\SettingsController;
 use App\Http\Controllers\Api\Pos\CashController;
+use App\Http\Controllers\Api\PrintQueueController;
 use App\Models\CashRegister;
 use App\Models\PrintQueue;
 use Illuminate\Http\Request;
@@ -31,7 +32,7 @@ Route::get('/ping', function () {
 });
 Route::post('/license/activate', [LicenseController::class, 'activate']);
 Route::get('/license/status', [LicenseController::class, 'status']);
-
+Route::post('/print-queue/{job}/dispatch-network', [PrintQueueController::class, 'dispatchNetwork']);
 // --- ROUTES PROTÉGÉES (SANCTUM) ---
 Route::middleware(['auth:sanctum'])->group(function () {
 
