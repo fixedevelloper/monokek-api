@@ -3,12 +3,14 @@
 namespace App\Http\Controllers\Api\Pos;
 
 use App\Http\Controllers\Controller;
+use App\Http\Services\CashSessionPrintService;
 use App\Models\CashRegister;
 use App\Models\CashSession;
 use App\Models\Payment;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Log;
 
 class CashController extends Controller
 {
@@ -80,6 +82,8 @@ public function storeRegister(Request $request)
 
     /**
      * Fermer la session de caisse (X-Report)
+     * @param Request $request
+     * @return
      */
     public function close(Request $request)
     {
@@ -108,8 +112,31 @@ public function storeRegister(Request $request)
             'note' => $request->note
         ]);
 
+        // Impression automatique du rapport de fermeture, si une imprimante est indiquée.
+        // On ne bloque jamais la fermeture de caisse à cause d'un problème d'impression :
+        // le caissier doit pouvoir clôturer même si l'imprimante est éteinte/déconnectée.
+        $printError = null;
+
+            $paymentsDetail = Payment::where('cash_session_id', $session->id)
+                ->join('payment_methods', 'payments.payment_method_id', '=', 'payment_methods.id')
+                ->select('payment_methods.name', DB::raw('SUM(amount) as total'))
+                ->groupBy('payment_methods.name')
+                ->get();
+
+            try {
+                app(CashSessionPrintService::class)->printClosingReport(
+                    $session,
+                    $paymentsDetail
+                );
+            } catch (\Exception $e) {
+                Log::error("Impression du rapport de fermeture impossible : " . $e->getMessage());
+                $printError = "Caisse fermée, mais l'impression du rapport a échoué : " . $e->getMessage();
+            }
+
+
         return response()->json([
             'message' => 'Caisse fermée avec succès',
+            'print_warning' => $printError, // null si tout va bien ou si pas d'imprimante fournie
             'report' => [
                 'opened_at' => $session->opened_at,
                 'closed_at' => $session->closed_at,

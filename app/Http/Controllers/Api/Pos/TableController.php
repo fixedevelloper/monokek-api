@@ -23,7 +23,6 @@ class TableController extends Controller
 
         return FloorResource::collection($floors);
     }
-// app/Http/Controllers/Api/FloorController.php
 
 public function storeFloor(Request $request)
 {

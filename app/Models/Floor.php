@@ -20,6 +20,22 @@ class Floor extends Model
     ];
 
     /**
+     * Si aucune branch_id n'est fournie à la création d'un Floor, on assigne
+     * automatiquement la première Branch existante — évite les Floor orphelins
+     * tant qu'un vrai sélecteur de branche n'est pas branché côté front.
+     */
+    protected static function boot()
+    {
+        parent::boot();
+
+        static::creating(function (Floor $floor) {
+            if (empty($floor->branch_id)) {
+                $floor->branch_id = Branch::query()->value('id');
+            }
+        });
+    }
+
+    /**
      * Relation avec la branche (Etablissement)
      */
     public function branch(): BelongsTo
