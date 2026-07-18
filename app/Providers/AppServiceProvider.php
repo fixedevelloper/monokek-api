@@ -3,6 +3,8 @@
 namespace App\Providers;
 
 use Illuminate\Support\ServiceProvider;
+use App\Models\PrintQueue;
+use App\Observers\PrintQueueObserver;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -19,6 +21,7 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        //
+        // Enregistrement de l'observer pour l'impression en temps réel
+        PrintQueue::observe(PrintQueueObserver::class);
     }
 }

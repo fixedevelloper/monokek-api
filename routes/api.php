@@ -68,6 +68,12 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::post('orders/{order}/finalize', [OrderController::class, 'finalizePayment']);
         Route::post('orders/{order}/serve', [OrderController::class, 'markAsServed']);
         Route::get('/tables/{table}/active-order', [OrderController::class, 'getActiveOrder']);
+        // À ajouter dans routes/api.php, dans le même groupe que send-round :
+
+        Route::patch('/rounds/{round}/items/{item}', [OrderController::class, 'updateRoundItemQty']);
+        Route::post('/rounds/{round}/items', [OrderController::class, 'addItemToRound']);
+
+// Remplace PosOrderController par le vrai nom de ta classe si différent.
     });
     Route::prefix('cash')->group(function () {
         Route::get('/registers', function () {

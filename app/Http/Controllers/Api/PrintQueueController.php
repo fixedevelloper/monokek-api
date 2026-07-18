@@ -14,25 +14,8 @@ use Exception;
 
 class PrintQueueController extends Controller
 {
-    /**
-     * Table de caractères imprimante utilisée (doit correspondre à la commande ESC t envoyée).
-     * Table 2 = CP850 chez la plupart des Xprinter (dont la XP-80TS), bon choix pour le français.
-     * Si les accents restent faux, teste 'CP1252' avec chr(19) à la place de chr(2).
-     */
     private const PRINTER_CHARSET = 'CP850';
 
-    /**
-     * Convertit une chaîne UTF-8 (venant de Laravel/JSON) vers l'encodage mono-octet
-     * attendu par l'imprimante thermique.
-     *
-     * IMPORTANT : ce texte converti doit être envoyé avec $printer->textRaw(),
-     * jamais avec $printer->text(). textRaw() envoie les octets tels quels, sans
-     * qu'escpos-php ne tente sa propre conversion automatique UTF-8 -> code page
-     * (basée sur le CapabilityProfile par défaut, qui pointe vers CP437 et n'a
-     * aucune idée qu'on a basculé l'imprimante en table 2 via write() en brut).
-     * C'est ce conflit entre les deux conversions qui causait les caractères
-     * illisibles, indépendamment du bon choix de code page.
-     */
     private function enc(?string $text): string
     {
         if ($text === null || $text === '') {
@@ -42,48 +25,45 @@ class PrintQueueController extends Controller
         return $converted !== false ? $converted : $text;
     }
 
-    /**
-     * Traite un job d'impression réseau en direct via Socket TCP
-     * @param Request $request
-     * @param $id
-     * @return
-     */
     public function dispatchNetwork(Request $request, $id)
     {
         $request->validate([
             'ip' => 'required|ip',
             'port' => 'integer',
             'job_type' => 'required|string',
-            'order' => 'required|array'
+            // 'order' n'est requis que si ce n'est pas un récap de caisse
+            'order' => 'required_unless:job_type,register_summary|array'
         ]);
 
         $ip = $request->input('ip');
         $port = $request->input('port', 9100);
         $jobType = $request->input('job_type');
-        $order = $request->input('order');
+        $order = $request->input('order', []);
         $store = $request->input('store', []);
+        $sessionData = $request->input('session_data', []); // Contiendra les ventes de la session
 
         $printer = null;
 
         try {
             $connector = new NetworkPrintConnector($ip, $port, 3);
-
             $printer = new Printer($connector);
             $printer->initialize();
 
-            // ESC t 2 = sélectionne la table CP850 sur l'imprimante.
-            // Doit correspondre à self::PRINTER_CHARSET ci-dessus.
+            // Sélection de la table CP850
             $printer->getPrintConnector()->write(chr(27) . chr(116) . chr(2));
 
-            // 2. Lancement de l'impression
+            // Routage des impressions
             if ($jobType === 'kitchen' || $jobType === 'bar') {
                 $this->printKitchenReceipt($printer, $jobType, $order);
+            } elseif ($jobType === 'register_summary') {
+                // Nouvelle méthode pour le récapitulatif de caisse
+                $this->printRegisterSessionSummary($printer, $sessionData, $store);
             } else {
                 $this->printClientReceipt($printer, $order, $store);
             }
 
-            // 3. Impulsion du tiroir de caisse
-            if ($jobType !== 'kitchen' && $jobType !== 'bar') {
+            // Impulsion du tiroir de caisse (Seulement pour client et récap de fin de caisse)
+            if (in_array($jobType, ['client', 'register_summary'])) {
                 try {
                     $printer->pulse(0, 120, 240);
                 } catch (Exception $e) {
@@ -107,6 +87,84 @@ class PrintQueueController extends Controller
                 $printer->close();
             }
         }
+    }
+
+    /**
+     * Imprime le récapitulatif des ventes d'une session de caisse
+     */
+    private function printRegisterSessionSummary(Printer $printer, array $session, array $store)
+    {
+        $printer->setJustification(Printer::JUSTIFY_CENTER);
+
+        // En-tête du magasin
+        $storeName = strtoupper($store['store_name'] ?? "RESTO");
+        $printer->setTextSize(2, 2);
+        $printer->textRaw($this->enc($storeName) . "\n");
+
+        $printer->setTextSize(1, 1);
+        $printer->textRaw($this->enc("CLOSURE / RECAPITULATIF DE CAISSE") . "\n");
+        $printer->textRaw("------------------------------------------\n");
+
+        // Informations Session
+        $printer->setJustification(Printer::JUSTIFY_LEFT);
+        $printer->textRaw($this->enc("Session  : #" . ($session['id'] ?? 'N/A')) . "\n");
+        $printer->textRaw($this->enc("Caissier : " . ($session['cashier_name'] ?? 'N/A')) . "\n");
+        $printer->textRaw($this->enc("Ouverture: " . ($session['opened_at'] ?? 'N/A')) . "\n");
+        $printer->textRaw($this->enc("Fermeture: " . ($session['closed_at'] ?? date('d/m/Y H:i:s'))) . "\n");
+        $printer->textRaw("------------------------------------------\n");
+
+        // 1. FINANCES / FLUX DE TRÉSORERIE
+        $printer->setJustification(Printer::JUSTIFY_CENTER);
+        $printer->textRaw($this->enc("--- FLUX DE CAISSE ---") . "\n");
+        $printer->setJustification(Printer::JUSTIFY_LEFT);
+
+        $openingBalance = $session['opening_balance'] ?? 0;
+        $expectedBalance = $session['expected_balance'] ?? 0;
+        $totalSales = $session['total_sales'] ?? 0;
+
+        $printer->textRaw(sprintf("%-25s %12s FCFA\n", $this->enc("Fond de caisse init."), $openingBalance));
+        $printer->textRaw(sprintf("%-25s %12s FCFA\n", $this->enc("+ Ventes de la session"), $totalSales));
+        $printer->textRaw("..........................................\n");
+        $printer->textRaw(sprintf("%-25s %12s FCFA\n", $this->enc("Théorique en caisse"), $expectedBalance));
+        $printer->textRaw("------------------------------------------\n");
+
+        // 2. REPARTITION PAR MODES DE PAIEMENT
+        $printer->setJustification(Printer::JUSTIFY_CENTER);
+        $printer->textRaw($this->enc("--- MODES DE REGLEMENTS ---") . "\n");
+        $printer->setJustification(Printer::JUSTIFY_LEFT);
+
+        $payments = $session['payment_methods_totals'] ?? [];
+        foreach ($payments as $payment) {
+            $methodName = $this->enc($payment['name'] ?? 'Autre');
+            $methodTotal = $payment['total'] ?? 0;
+            $printer->textRaw(sprintf("- %-22s : %12s FCFA\n", $methodName, $methodTotal));
+        }
+        $printer->textRaw("------------------------------------------\n");
+
+        // 3. RECAPITULATIF DES ARTICLES VENDUS (Le top des ventes de la session)
+        $items = $session['sold_items_summary'] ?? [];
+        if (!empty($items)) {
+            $printer->setJustification(Printer::JUSTIFY_CENTER);
+            $printer->textRaw($this->enc("--- ARTICLES VENDUS ---") . "\n");
+            $printer->setJustification(Printer::JUSTIFY_LEFT);
+
+            foreach ($items as $item) {
+                $qty = $item['qty'] ?? 0;
+                $name = $this->enc(mb_strimwidth($item['product_name'] ?? 'Article', 0, 22, ".."));
+                $totalPrice = $item['total'] ?? 0;
+
+                // Formatage aligné : Qte x NomArticle -> Prix cumulé
+                $line = sprintf("%-3dx %-23s %9s FCFA\n", $qty, $name, $totalPrice);
+                $printer->textRaw($line);
+            }
+            $printer->textRaw("------------------------------------------\n");
+        }
+
+        // Pied de page du rapport
+        $printer->setJustification(Printer::JUSTIFY_CENTER);
+        $printer->textRaw(date('d/m/Y H:i:s') . "\n");
+        $printer->textRaw($this->enc("Rapport généré avec succès.") . "\n");
+        $printer->feed(3);
     }
 
     private function printKitchenReceipt(Printer $printer, $type, $order)
@@ -148,10 +206,8 @@ class PrintQueueController extends Controller
     {
         $printer->setJustification(Printer::JUSTIFY_CENTER);
 
-        // ── CHARGEMENT ET IMPRESSION DU LOGO DEPUIS LE DOSSIER PUBLIC ──
         try {
             $logoPath = public_path('images/logo.png');
-
             if (file_exists($logoPath)) {
                 $logo = EscposImage::load($logoPath);
                 $printer->bitImage($logo, Printer::IMG_DOUBLE_WIDTH);
@@ -161,7 +217,6 @@ class PrintQueueController extends Controller
             Log::error("Impossible d'imprimer le logo : " . $e->getMessage());
         }
 
-        // Nom Enseigne
         $storeName = strtoupper($store['store_name'] ?? "RESTO");
         $printer->setTextSize(2, 2);
         $printer->textRaw($this->enc($storeName) . "\n");
@@ -172,14 +227,12 @@ class PrintQueueController extends Controller
         $printer->textRaw(date('d/m/Y H:i:s') . "\n");
         $printer->textRaw("------------------------------------------\n");
 
-        // Infos Commande
         $printer->setJustification(Printer::JUSTIFY_LEFT);
         $printer->textRaw($this->enc("Table    : " . ($order['table']['name'] ?? 'N/A')) . "\n");
         $printer->textRaw($this->enc("Facture  : " . ($order['reference'] ?? 'N/A')) . "\n");
         $printer->textRaw($this->enc("Serveur  : " . ($order['user']['name'] ?? $order['waiter']['name'] ?? 'N/A')) . "\n");
         $printer->textRaw("------------------------------------------\n");
 
-        // Liste des articles par Services (Rounds)
         $rounds = $order['rounds'] ?? [];
         foreach ($rounds as $index => $round) {
             $roundItems = $round['items'] ?? [];
@@ -191,8 +244,6 @@ class PrintQueueController extends Controller
 
             foreach ($roundItems as $i) {
                 $qty = $i['qty'] ?? 1;
-                // Tronquer puis convertir AVANT le sprintf pour garder un alignement
-                // correct des colonnes (CP850 = 1 octet par caractère, contrairement à l'UTF-8).
                 $name = $this->enc(mb_strimwidth($i['product']['name'] ?? 'Article', 0, 22, ".."));
                 $totalPrice = $i['total'] ?? 0;
 
@@ -201,7 +252,6 @@ class PrintQueueController extends Controller
             }
         }
 
-        // Totaux
         $printer->textRaw("==========================================\n");
         $printer->setJustification(Printer::JUSTIFY_RIGHT);
         $printer->setTextSize(2, 1);
@@ -209,8 +259,6 @@ class PrintQueueController extends Controller
         $printer->setTextSize(1, 1);
         $printer->textRaw("------------------------------------------\n");
 
-        // Règlements
-        $printer->setJustification(Printer::JUSTIFY_LEFT);
         $payments = $order['payments'] ?? [];
         if (!empty($payments)) {
             $printer->textRaw($this->enc("RÈGLEMENTS :") . "\n");
@@ -222,19 +270,14 @@ class PrintQueueController extends Controller
             $printer->textRaw($this->enc("REGLEMENT : En attente") . "\n");
         }
 
-        // ── QR CODE ──
         $qrContent = $order['qr_content'] ?? null;
-
         if (empty($qrContent) && !empty($order['reference'])) {
-            // 💡 FORMAT PRO : Un condensé des données de la facture (Idéal pour contrôle rapide)
             $qrData = [
                 'REF'  => $order['reference'],
                 'DATE' => date('d-m-Y_H:i'),
                 'MNT'  => ($order['total'] ?? 0) . ' FCFA',
                 'SYS'  => $store['store_name'] ?? "RESTO"
             ];
-
-            // Convertit en JSON compact pour le QR Code
             $qrContent = json_encode($qrData);
         }
 
@@ -244,12 +287,9 @@ class PrintQueueController extends Controller
             try {
                 $printer->qrCode($qrContent, Printer::QR_ECLEVEL_L, 6, Printer::QR_MODEL_2);
             } catch (Exception $e) {
-                // Si l'imprimante ne supporte pas le QR natif, on log et on continue
-                // sans bloquer le reste du ticket.
                 Log::error("Impossible d'imprimer le QR code : " . $e->getMessage());
             }
             $printer->feed(1);
-           // $printer->textRaw($this->enc("Scannez pour suivre votre facture") . "\n");
         }
 
         $printer->setJustification(Printer::JUSTIFY_CENTER);

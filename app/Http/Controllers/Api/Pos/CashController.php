@@ -4,9 +4,12 @@ namespace App\Http\Controllers\Api\Pos;
 
 use App\Http\Controllers\Controller;
 use App\Http\Services\CashSessionPrintService;
+use App\Http\Services\PrintManagerService;
 use App\Models\CashRegister;
 use App\Models\CashSession;
 use App\Models\Payment;
+use App\Models\Printer;
+use App\Models\PrintQueue;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Carbon\Carbon;
@@ -79,20 +82,17 @@ public function storeRegister(Request $request)
             'session' => $session->load('register')
         ], 201);
     }
-
-    /**
-     * Fermer la session de caisse (X-Report)
-     * @param Request $request
-     * @return
+       /**
+     * Fermer la session de caisse (X-Report / Z-Report)
      */
     public function close(Request $request)
     {
         $request->validate([
-            'closing_amount' => 'required|numeric|min:0', // Montant réel compté
-            'note' => 'nullable|string'
+            'closing_amount' => 'required|numeric|min:0',
+            'note'           => 'nullable|string',
         ]);
 
-        $session = CashSession::where('user_id', auth()->id())
+        $session = CashSession::with('register.branch')->where('user_id', auth()->id())
             ->whereNull('closed_at')
             ->first();
 
@@ -100,56 +100,92 @@ public function storeRegister(Request $request)
             return response()->json(['message' => 'Aucune session active trouvée'], 404);
         }
 
-        // Calculer le montant théorique attendu
-        // Total = Fond de caisse + Somme des paiements
+        // 1. Calcul du montant théorique attendu
         $totalPayments = Payment::where('cash_session_id', $session->id)->sum('amount');
         $expectedAmount = $session->opening_amount + $totalPayments;
 
         $session->update([
-            'closing_amount' => $request->closing_amount,
+            'closing_amount'  => $request->closing_amount,
             'expected_amount' => $expectedAmount,
-            'closed_at' => now(),
-            'note' => $request->note
+            'closed_at'       => now(),
+            'note'            => $request->note
         ]);
 
-        // Impression automatique du rapport de fermeture, si une imprimante est indiquée.
-        // On ne bloque jamais la fermeture de caisse à cause d'un problème d'impression :
-        // le caissier doit pouvoir clôturer même si l'imprimante est éteinte/déconnectée.
-        $printError = null;
+        // 2. Récupération du détail des paiements
+        $paymentsDetail = Payment::where('cash_session_id', $session->id)
+            ->join('payment_methods', 'payments.payment_method_id', '=', 'payment_methods.id')
+            ->select('payment_methods.name', DB::raw('SUM(payments.amount) as total'))
+            ->groupBy('payment_methods.name')
+            ->get()
+            ->toArray();
 
-            $paymentsDetail = Payment::where('cash_session_id', $session->id)
-                ->join('payment_methods', 'payments.payment_method_id', '=', 'payment_methods.id')
-                ->select('payment_methods.name', DB::raw('SUM(amount) as total'))
-                ->groupBy('payment_methods.name')
-                ->get();
+        // 3. Récupération du résumé des articles vendus
+        $soldItemsSummaryRaw = DB::table('order_items')
+            ->join('order_rounds', 'order_items.order_round_id', '=', 'order_rounds.id')
+            ->join('orders', 'order_rounds.order_id', '=', 'orders.id')
+            ->join('products', 'order_items.product_id', '=', 'products.id')
+            ->join('payments', 'payments.order_id', '=', 'orders.id')
+            ->where('payments.cash_session_id', $session->id)
+            ->whereIn('orders.status', ['paid', 'completed'])
+            ->select(
+                'products.name as product_name',
+                DB::raw('SUM(order_items.qty) as qty'),
+                DB::raw('SUM(order_items.total) as total')
+            )
+            ->groupBy('products.id', 'products.name')
+            ->get();
 
-            try {
-                app(CashSessionPrintService::class)->printClosingReport(
-                    $session,
-                    $paymentsDetail
-                );
-            } catch (\Exception $e) {
-                Log::error("Impression du rapport de fermeture impossible : " . $e->getMessage());
-                $printError = "Caisse fermée, mais l'impression du rapport a échoué : " . $e->getMessage();
-            }
+        $soldItemsSummary = json_decode(json_encode($soldItemsSummaryRaw), true);
 
+        // 4. Ciblage de l'imprimante ticket active pour la branche
+        $printer = Printer::where('branch_id', $session->register->branch_id ?? null)
+            ->where('location', 'receipt')
+            ->where('is_active', true)
+            ->first();
+
+        $printStatusMessage = "Aucune imprimante de caisse configurée.";
+
+        if ($printer) {
+            // Préparation du payload de données structuré pour ton PrintManagerService
+            $sessionSummaryData = [
+                'id'                     => $session->id,
+                'cashier_name'           => auth()->user()->name ?? 'Caissier',
+                'opened_at'              => $session->opened_at->toIso8601String(),
+                'closed_at'              => $session->closed_at->toIso8601String(),
+                'opening_balance'        => $session->opening_amount,
+                'total_sales'            => $totalPayments,
+                'expected_balance'       => $expectedAmount,
+                'payment_methods_totals' => $paymentsDetail,
+                'sold_items_summary'     => $soldItemsSummary
+            ];
+
+            // 5. Enregistrement direct dans ta table d'impression
+            PrintQueue::create([
+                'printer_id' => $printer->id,
+                'job_type'       => 'session_summary', // Identifiant unique pour que ton worker sache quel template utiliser
+                'content'    => $sessionSummaryData, // Laravel sérialisera automatiquement en JSON si ton modèle a le cast 'array' ou 'json'
+                'status'     => 'pending',
+            ]);
+
+            $printStatusMessage = "Impression du rapport enregistrée dans la file d'attente.";
+        }
 
         return response()->json([
-            'message' => 'Caisse fermée avec succès',
-            'print_warning' => $printError, // null si tout va bien ou si pas d'imprimante fournie
-            'report' => [
-                'opened_at' => $session->opened_at,
-                'closed_at' => $session->closed_at,
-                'opening_amount' => $session->opening_amount,
-                'total_payments' => $totalPayments,
-                'expected_total' => $expectedAmount,
-                'actual_total' => $request->closing_amount,
-                'difference' => $request->closing_amount - $expectedAmount,
-                'note' => $request->note
+            'message'       => 'Caisse fermée avec succès',
+            'print_status'  => $printStatusMessage,
+            'report'        => [
+                'opened_at'       => $session->opened_at,
+                'closed_at'       => $session->closed_at,
+                'opening_amount'  => $session->opening_amount,
+                'total_payments'  => $totalPayments,
+                'expected_total'  => $expectedAmount,
+                'actual_total'    => $request->closing_amount,
+                'difference'      => $request->closing_amount - $expectedAmount,
+                'note'            => $request->note,
+                'payments_detail' => $paymentsDetail
             ]
         ]);
     }
-
     /**
      * Obtenir le récapitulatif actuel sans fermer (Z-Report)
      */

@@ -14,9 +14,12 @@ class RestaurantTableResource extends JsonResource
             'name' => $this->name,
             'seats' => $this->seats,
             'status' => $this->status ?? 'free',
-            'floor_name'=> $this->whenLoaded('floor', fn() => $this->floor->name)
-            // On peut ajouter ici le total de la commande en cours si besoin
-            //'current_bill' => $this->when(isset($this->active_order_total), $this->active_order_total),
+            'floor_name' => $this->whenLoaded('floor', fn() => $this->floor->name),
+            // whenLoaded() (au lieu de isset()) : n'inclut 'total' que si la
+            // relation currentOrder a été eager-loadée en amont, sans jamais
+            // déclencher de requête N+1. Le ?-> gère le cas table libre
+            // (currentOrder chargée mais null).
+            'total' => $this->whenLoaded('currentOrder', fn() => $this->currentOrder?->total),
         ];
     }
 }

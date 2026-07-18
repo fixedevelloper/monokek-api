@@ -17,7 +17,7 @@ class TableController extends Controller
 
     public function floors()
     {
-        $floors = Floor::with(['tables'])
+        $floors = Floor::with(['tables','tables.currentOrder'])
             ->withCount('tables')
             ->get();
 

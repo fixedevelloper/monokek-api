@@ -14,7 +14,26 @@ class Order extends Model
     use HasFactory;
 
     protected $guarded = [];
-
+    /**
+     * Statuts représentant une commande encore "vivante" — sur laquelle on peut
+     * légitimement ajouter un round, afficher le total en cours, etc.
+     * Tout statut absent de cette liste (paid, completed, cancelled, ...) signifie
+     * que la commande est close : il faut en créer une nouvelle pour la table.
+     *
+     * Utilisée par :
+     * - RestaurantTable::currentOrder()
+     * - PosOrderController::sendRound() (remplace l'ancien private const OPEN_ORDER_STATUSES)
+     *
+     * Confirme la liste exacte avec Rodrigue avant de merger — notamment le sort
+     * de 'completed' (servi mais pas payé ? ou déjà clos ?) et 'draft'.
+     */
+    public const OPEN_STATUSES = [
+        'pending',
+        'preparing',
+        'ready',
+        'billing',
+        'pending_payment',
+    ];
     protected $casts = [
         'subtotal' => 'decimal:2',
         'tax'      => 'decimal:2',

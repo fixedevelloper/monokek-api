@@ -17,12 +17,12 @@ class DatabaseSeeder extends Seeder
             RoleSeeder::class,
             PermissionSeeder::class,
             CompanySeeder::class,
-            //ModifierSeeder::class,
-           // ProductSeeder::class,
+            ModifierSeeder::class,
+            ProductSeeder::class,
             AdminUserSeeder::class,
-            //FloorSeeder::class,        // 4. Les zones/étages
-           // TableSeeder::class,
-           // KitchenStationSeeder::class,
+            FloorSeeder::class,        // 4. Les zones/étages
+           TableSeeder::class,
+            KitchenStationSeeder::class,
             UnitSeeder::class,
             IngredientSeeder::class,
             SupplierSeeder::class,
