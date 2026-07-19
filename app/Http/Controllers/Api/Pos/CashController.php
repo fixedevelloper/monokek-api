@@ -147,7 +147,7 @@ public function storeRegister(Request $request)
 
         if ($printer) {
             // Préparation du payload de données structuré pour ton PrintManagerService
-            $sessionSummaryData = [
+            $sessionSummaryData['order'] = [
                 'id'                     => $session->id,
                 'cashier_name'           => auth()->user()->name ?? 'Caissier',
                 'opened_at'              => $session->opened_at->toIso8601String(),

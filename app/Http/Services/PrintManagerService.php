@@ -361,6 +361,12 @@ class PrintManagerService
                 }
                 $printer->feed(1);
             }
+            try {
+                Log::debug("[Printer] Envoi de l'impulsion d'ouverture du tiroir-caisse.");
+                $printer->pulse(0, 120, 240);
+            } catch (Exception $e) {
+                Log::warning("[Printer] Impossible de déclencher le tiroir-caisse.", ['error' => $e->getMessage()]);
+            }
 
             $printer->setJustification(Printer::JUSTIFY_CENTER);
             $printer->textRaw($this->enc("\nMerci de votre visite !") . "\n");
